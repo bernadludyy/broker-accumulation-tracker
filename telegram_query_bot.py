@@ -804,29 +804,196 @@ def format_single_period(ticker: str, period: str) -> str:
     return "\n".join(lines)
 
 
+def _broker_avg_buy(row: dict[str, Any]) -> float | None:
+    buy_lots = float(row.get("buy_lots", 0) or 0)
+    buy_value = float(row.get("buy_value", 0) or 0)
+
+    if buy_lots <= 0:
+        return None
+
+    return buy_value / (buy_lots * 100)
+
+
+def _broker_avg_sell(row: dict[str, Any]) -> float | None:
+    sell_lots = float(row.get("sell_lots", 0) or 0)
+    sell_value = float(row.get("sell_value", 0) or 0)
+
+    if sell_lots <= 0:
+        return None
+
+    return sell_value / (sell_lots * 100)
+
+
+def _price_vs_avg_pct(
+    last_price: float | None,
+    avg_price: float | None,
+) -> float | None:
+    if (
+        last_price is None
+        or avg_price is None
+        or avg_price == 0
+    ):
+        return None
+
+    return ((last_price / avg_price) - 1) * 100
+
+
+def _dominant_broker_by_value(
+    brokers: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if not brokers:
+        return None
+
+    return max(
+        brokers,
+        key=lambda row: abs(
+            float(row.get("net_value", 0) or 0)
+        ),
+    )
+
+
 def format_value_report(ticker: str) -> str:
     ticker = normalize_ticker(ticker)
-    lines = [f"💰 VALUE FLOW — {ticker}", ""]
+    last_price = cached_last_price(ticker)
+
+    lines = [
+        f"💰 VALUE FLOW — {ticker}",
+    ]
+
+    if last_price is not None:
+        lines.append(
+            f"Cached Last Price: {format_price(last_price)}"
+        )
+
+    lines.append("")
 
     found = False
 
     for period in ("5D", "10D", "20D", "YTD"):
-        summary, _ = aggregate_period(ticker, period)
+        summary, brokers = aggregate_period(ticker, period)
+
         if not summary:
             continue
+
         found = True
+
         lines.extend(
             [
-                f"{period}",
+                f"{period} | {summary.start_date} → {summary.end_date}",
                 f"> Buy Value: {format_rp(summary.buy_value)}",
                 f"> Sell Value: {format_rp(summary.sell_value)}",
                 f"> Net Value: {format_rp(summary.net_value, signed=True)}",
                 f"> Value Ratio: {summary.value_ratio:+.2%}",
                 f"> Net Lot: {format_int(summary.net_lots, signed=True)} lot",
+                (
+                    f"> Overall Avg Buy/Sell: "
+                    f"{format_price(summary.avg_buy_price)} / "
+                    f"{format_price(summary.avg_sell_price)}"
+                ),
                 f"> Flow: {summary.flow}",
-                "",
             ]
         )
+
+        dominant = _dominant_broker_by_value(brokers)
+
+        if dominant:
+            dominant_net_value = float(
+                dominant.get("net_value", 0) or 0
+            )
+            dominant_net_lots = float(
+                dominant.get("net_lots", 0) or 0
+            )
+
+            dominant_side = (
+                "NET BUY"
+                if dominant_net_value > 0
+                else "NET SELL"
+                if dominant_net_value < 0
+                else "NEUTRAL"
+            )
+
+            dominant_avg_buy = _broker_avg_buy(dominant)
+            dominant_avg_sell = _broker_avg_sell(dominant)
+
+            price_vs_dominant = _price_vs_avg_pct(
+                last_price,
+                dominant_avg_buy,
+            )
+
+            lines.extend(
+                [
+                    "",
+                    "🏦 DOMINANT CC — NET VALUE",
+                    (
+                        f"> {dominant.get('broker', '-')}"
+                        f" | {dominant_side}"
+                    ),
+                    (
+                        f"> Net Value: "
+                        f"{format_rp(dominant_net_value, signed=True)}"
+                    ),
+                    (
+                        f"> Net Lot: "
+                        f"{format_int(dominant_net_lots, signed=True)} lot"
+                    ),
+                    (
+                        f"> Avg Buy/Sell: "
+                        f"{format_price(dominant_avg_buy)} / "
+                        f"{format_price(dominant_avg_sell)}"
+                    ),
+                ]
+            )
+
+            if price_vs_dominant is not None:
+                lines.append(
+                    f"> Price vs CC Avg Buy: "
+                    f"{price_vs_dominant:+.2f}%"
+                )
+
+        top_buyers, _ = top_brokers(
+            brokers,
+            field="net_value",
+            n=3,
+        )
+
+        if top_buyers:
+            lines.extend(
+                [
+                    "",
+                    "TOP 3 NET BUY CC — VALUE",
+                ]
+            )
+
+            for idx, row in enumerate(top_buyers, start=1):
+                avg_buy = _broker_avg_buy(row)
+                avg_sell = _broker_avg_sell(row)
+                price_vs_avg = _price_vs_avg_pct(
+                    last_price,
+                    avg_buy,
+                )
+
+                lines.append(
+                    (
+                        f"{idx}. {row.get('broker', '-')}"
+                        f" | {format_rp(row.get('net_value', 0), signed=True)}"
+                        f" | {format_int(row.get('net_lots', 0), signed=True)} lot"
+                    )
+                )
+
+                lines.append(
+                    (
+                        f"   Avg Buy/Sell: "
+                        f"{format_price(avg_buy)} / "
+                        f"{format_price(avg_sell)}"
+                    )
+                )
+
+                if price_vs_avg is not None:
+                    lines.append(
+                        f"   Price vs Avg Buy: {price_vs_avg:+.2f}%"
+                    )
+
+        lines.append("")
 
     if not found:
         return f"❌ Tidak ada data value untuk {ticker}."
