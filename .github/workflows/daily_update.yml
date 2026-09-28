@@ -1,0 +1,71 @@
+name: Daily Broker Update
+
+on:
+  schedule:
+    - cron: "15 18 * * 1-5"
+      timezone: "Asia/Jakarta"
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: broker-bot-db
+  cancel-in-progress: false
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    env:
+      ZPI_API_KEY: ${{ secrets.ZPI_API_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      DB_PATH: broker_tracker.db
+      PYTHONUTF8: "1"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: requirements_github.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements_github.txt
+
+      - name: Run existing daily runner
+        run: python daily_runner.py
+
+      - name: Flush SQLite WAL
+        if: always()
+        run: python checkpoint_db.py
+
+      - name: Persist daily database changes
+        if: always()
+        shell: bash
+        run: |
+          git config user.name "broker-bot-actions"
+          git config user.email "broker-bot-actions@users.noreply.github.com"
+
+          if [ -f broker_tracker.db ]; then
+            git add -f broker_tracker.db
+          fi
+
+          git add watchlist.txt telegram_watchlist.txt .last_sent_safe_end_date 2>/dev/null || true
+
+          if git diff --cached --quiet; then
+            echo "No persistent data changes."
+            exit 0
+          fi
+
+          git commit -m "bot: daily broker update [skip ci]"
+          git push

@@ -1,0 +1,12 @@
+name = "telegram-broker-dispatch"
+main = "worker.js"
+compatibility_date = "2026-09-28"
+
+[vars]
+GITHUB_OWNER = "YOUR_GITHUB_USERNAME"
+GITHUB_REPO = "YOUR_PRIVATE_REPOSITORY"
+TELEGRAM_CHAT_ID = "YOUR_TELEGRAM_CHAT_ID"
+
+# Set as Cloudflare secrets, JANGAN taruh nilainya di file:
+# wrangler secret put GITHUB_TOKEN
+# wrangler secret put TELEGRAM_WEBHOOK_SECRET

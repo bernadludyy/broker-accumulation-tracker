@@ -1,0 +1,27 @@
+# Secrets
+.env
+
+# Python virtual environment
+.venv/
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs / temporary
+logs/
+snapshots/
+
+# VS Code
+.vscode/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Local backup / notebook
+daily_runner_old.py
+daily_runner_old_backfill.py
+broker_tracker.ipynb

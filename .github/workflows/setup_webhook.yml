@@ -1,0 +1,45 @@
+name: Setup Telegram Webhook
+
+on:
+  workflow_dispatch:
+    inputs:
+      worker_url:
+        description: "Cloudflare Worker URL, contoh https://telegram-broker-dispatch.username.workers.dev"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  webhook:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set Telegram webhook
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+          WORKER_URL: ${{ inputs.worker_url }}
+        shell: bash
+        run: |
+          curl --fail-with-body -sS \
+            -X POST "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+              --arg url "$WORKER_URL" \
+              --arg secret "$WEBHOOK_SECRET" \
+              '{
+                url: $url,
+                secret_token: $secret,
+                allowed_updates: ["message", "edited_message"],
+                drop_pending_updates: true
+              }')"
+
+      - name: Get webhook info
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          echo
+          curl --fail-with-body -sS \
+            "https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo"
