@@ -885,6 +885,131 @@ def _price_vs_avg_pct(
 
     return ((last_price / avg_price) - 1) * 100
 
+def format_broker_code_report(
+    ticker: str,
+    broker_code: str,
+    period: str = "20D",
+) -> str:
+    ticker = normalize_ticker(ticker)
+    broker_code = broker_code.strip().upper()
+    period = period.strip().upper()
+
+    if period not in {"5D", "10D", "20D", "YTD"}:
+        return (
+            "❌ Period tidak valid.\n"
+            "Gunakan: 5D, 10D, 20D, atau YTD."
+        )
+
+    summary, brokers = aggregate_period(
+        ticker,
+        period,
+    )
+
+    if not summary:
+        return (
+            f"❌ Tidak ada data {ticker} "
+            f"untuk periode {period}."
+        )
+
+    broker = next(
+        (
+            row
+            for row in brokers
+            if str(row.get("broker", "")).upper()
+            == broker_code
+        ),
+        None,
+    )
+
+    if not broker:
+        return (
+            f"❌ Broker {broker_code} tidak memiliki "
+            f"data pada {ticker} {period}."
+        )
+
+    buy_lots = float(
+        broker.get("buy_lots", 0) or 0
+    )
+    sell_lots = float(
+        broker.get("sell_lots", 0) or 0
+    )
+    net_lots = float(
+        broker.get("net_lots", 0) or 0
+    )
+
+    buy_value = float(
+        broker.get("buy_value", 0) or 0
+    )
+    sell_value = float(
+        broker.get("sell_value", 0) or 0
+    )
+    net_value = float(
+        broker.get("net_value", 0) or 0
+    )
+
+    avg_buy = _broker_avg_buy(broker)
+    avg_sell = _broker_avg_sell(broker)
+
+    last_price, price_source = get_latest_price(
+        ticker
+    )
+
+    price_vs_buy = _price_vs_avg_pct(
+        last_price,
+        avg_buy,
+    )
+
+    price_vs_sell = _price_vs_avg_pct(
+        last_price,
+        avg_sell,
+    )
+
+    if net_value > 0:
+        action = "NET BUY"
+    elif net_value < 0:
+        action = "NET SELL"
+    else:
+        action = "NEUTRAL"
+
+    lines = [
+        f"🏦 BROKER {broker_code} — {ticker} {period}",
+        f"Period: {summary.start_date} → {summary.end_date}",
+        f"Action: {action}",
+        "",
+        f"> Buy Value: {format_rp(buy_value)}",
+        f"> Sell Value: {format_rp(sell_value)}",
+        f"> Net Value: {format_rp(net_value, signed=True)}",
+        "",
+        f"> Buy Lot: {format_int(buy_lots)} lot",
+        f"> Sell Lot: {format_int(sell_lots)} lot",
+        f"> Net Lot: {format_int(net_lots, signed=True)} lot",
+        "",
+        f"> Weighted Avg Buy: {format_price(avg_buy)}",
+        f"> Weighted Avg Sell: {format_price(avg_sell)}",
+    ]
+
+    if last_price is not None:
+        if price_source == "ZAPI":
+            lines.append(
+                f"> Latest Price: {format_price(last_price)}"
+            )
+        else:
+            lines.append(
+                f"> Cached Price (fallback): "
+                f"{format_price(last_price)}"
+            )
+
+    if price_vs_buy is not None:
+        lines.append(
+            f"> Price vs Avg Buy: {price_vs_buy:+.2f}%"
+        )
+
+    if price_vs_sell is not None:
+        lines.append(
+            f"> Price vs Avg Sell: {price_vs_sell:+.2f}%"
+        )
+
+    return "\n".join(lines)
 
 def _dominant_broker_by_value(
     brokers: list[dict[str, Any]],
@@ -1179,6 +1304,15 @@ ADRO VALUE
 ADRO BROKER
 → Dominant broker 20D berdasarkan Value + Lot
 
+ADRO CC NI
+→ Detail broker NI, default 20D
+
+ADRO CC NI 5D
+ADRO CC NI 10D
+ADRO CC NI 20D
+ADRO CC NI YTD
+→ AVG Buy/Sell + Net Value/Lot broker tertentu
+
 Commands:
 /add BBRI
 → Tambah watchlist + smart YTD backfill
@@ -1354,6 +1488,40 @@ def command_result(text: str, chat_id: str) -> str:
         return format_full_report(ticker)
 
     tokens = [p.upper() for p in parts[1:]]
+
+        # Specific broker / CC query
+    # Contoh:
+    # BKSL CC NI
+    # BKSL CC NI 5D
+    # BKSL CC NI 10D
+    # BKSL CC NI 20D
+    # BKSL CC NI YTD
+
+    if "CC" in tokens:
+        cc_index = tokens.index("CC")
+
+        if cc_index + 1 >= len(tokens):
+            return (
+                "❌ Format salah.\n"
+                "Contoh: BKSL CC NI 20D"
+            )
+
+        broker_code = tokens[cc_index + 1]
+
+        period = next(
+            (
+                p
+                for p in ("5D", "10D", "20D", "YTD")
+                if p in tokens
+            ),
+            "20D",
+        )
+
+        return format_broker_code_report(
+            ticker,
+            broker_code,
+            period,
+        )
 
     for period in ("5D", "10D", "20D", "YTD"):
         if period in tokens and "BROKER" not in tokens:
