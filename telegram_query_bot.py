@@ -608,11 +608,19 @@ def get_latest_price(
 
     return None, "NONE"
 
-def latest_daily_summary(ticker: str) -> PeriodSummary | None:
+def latest_daily_broker_data(
+    ticker: str,
+) -> tuple[
+    PeriodSummary | None,
+    list[dict[str, Any]],
+]:
     ticker = normalize_ticker(ticker)
+
     dates = available_trade_dates(ticker)
+
     if not dates:
-        return None
+        return None, []
+
     last_date = dates[-1]
 
     with db_connect() as con:
@@ -620,58 +628,182 @@ def latest_daily_summary(ticker: str) -> PeriodSummary | None:
             """
             SELECT
                 broker,
-                COALESCE(SUM(CASE WHEN side='BUY' THEN lots ELSE 0 END),0)
-                    AS buy_lots,
-                COALESCE(SUM(CASE WHEN side='SELL' THEN lots ELSE 0 END),0)
-                    AS sell_lots,
-                COALESCE(SUM(CASE WHEN side='BUY' THEN value ELSE 0 END),0)
-                    AS buy_value,
-                COALESCE(SUM(CASE WHEN side='SELL' THEN value ELSE 0 END),0)
-                    AS sell_value
+
+                COALESCE(
+                    SUM(
+                        CASE
+                            WHEN side='BUY'
+                            THEN lots
+                            ELSE 0
+                        END
+                    ),
+                    0
+                ) AS buy_lots,
+
+                COALESCE(
+                    SUM(
+                        CASE
+                            WHEN side='SELL'
+                            THEN lots
+                            ELSE 0
+                        END
+                    ),
+                    0
+                ) AS sell_lots,
+
+                COALESCE(
+                    SUM(
+                        CASE
+                            WHEN side='BUY'
+                            THEN value
+                            ELSE 0
+                        END
+                    ),
+                    0
+                ) AS buy_value,
+
+                COALESCE(
+                    SUM(
+                        CASE
+                            WHEN side='SELL'
+                            THEN value
+                            ELSE 0
+                        END
+                    ),
+                    0
+                ) AS sell_value
+
             FROM broker_daily
+
             WHERE ticker = ?
               AND trade_date = ?
+
             GROUP BY broker
             """,
-            (ticker, last_date),
+            (
+                ticker,
+                last_date,
+            ),
         ).fetchall()
 
     if not rows:
-        return None
+        return None, []
 
-    buy_lots = sum(float(r["buy_lots"]) for r in rows)
-    sell_lots = sum(float(r["sell_lots"]) for r in rows)
-    buy_value = sum(float(r["buy_value"]) for r in rows)
-    sell_value = sum(float(r["sell_value"]) for r in rows)
+    broker_rows: list[dict[str, Any]] = []
+
+    for row in rows:
+        item = dict(row)
+
+        item["buy_lots"] = float(
+            item.get("buy_lots", 0) or 0
+        )
+
+        item["sell_lots"] = float(
+            item.get("sell_lots", 0) or 0
+        )
+
+        item["buy_value"] = float(
+            item.get("buy_value", 0) or 0
+        )
+
+        item["sell_value"] = float(
+            item.get("sell_value", 0) or 0
+        )
+
+        item["net_lots"] = (
+            item["buy_lots"]
+            - item["sell_lots"]
+        )
+
+        item["net_value"] = (
+            item["buy_value"]
+            - item["sell_value"]
+        )
+
+        broker_rows.append(item)
+
+    buy_lots = sum(
+        row["buy_lots"]
+        for row in broker_rows
+    )
+
+    sell_lots = sum(
+        row["sell_lots"]
+        for row in broker_rows
+    )
+
+    buy_value = sum(
+        row["buy_value"]
+        for row in broker_rows
+    )
+
+    sell_value = sum(
+        row["sell_value"]
+        for row in broker_rows
+    )
+
     net_lots = buy_lots - sell_lots
     net_value = buy_value - sell_value
 
-    return PeriodSummary(
+    summary = PeriodSummary(
         ticker=ticker,
         label="LATEST",
         start_date=last_date,
         end_date=last_date,
         trading_days=1,
+
         buy_lots=buy_lots,
         sell_lots=sell_lots,
         net_lots=net_lots,
+
         buy_value=buy_value,
         sell_value=sell_value,
         net_value=net_value,
-        avg_buy_price=(buy_value / (buy_lots * 100) if buy_lots else None),
-        avg_sell_price=(sell_value / (sell_lots * 100) if sell_lots else None),
+
+        avg_buy_price=(
+            buy_value / (buy_lots * 100)
+            if buy_lots
+            else None
+        ),
+
+        avg_sell_price=(
+            sell_value / (sell_lots * 100)
+            if sell_lots
+            else None
+        ),
+
         lot_ratio=(
-            net_lots / (buy_lots + sell_lots)
+            net_lots
+            / (buy_lots + sell_lots)
             if (buy_lots + sell_lots)
             else 0.0
         ),
+
         value_ratio=(
-            net_value / (buy_value + sell_value)
+            net_value
+            / (buy_value + sell_value)
             if (buy_value + sell_value)
             else 0.0
         ),
-        flow=flow_label(net_lots, net_value),
+
+        flow=flow_label(
+            net_lots,
+            net_value,
+        ),
     )
+
+    return summary, broker_rows
+
+
+def latest_daily_summary(
+    ticker: str,
+) -> PeriodSummary | None:
+
+    summary, _ = latest_daily_broker_data(
+        ticker
+    )
+
+    return summary
 
 
 def top_brokers(
@@ -770,18 +902,190 @@ def format_full_report(ticker: str) -> str:
             lines.append(format_period(summary))
             lines.append("")
 
-    latest = latest_daily_summary(ticker)
+        latest, latest_brokers = (
+        latest_daily_broker_data(ticker)
+    )
+
     if latest:
         lines.extend(
             [
-                "LATEST BROKER ACTION",
+                "📊 LATEST BROKER ACTION",
                 f"> Date: {latest.end_date}",
-                f"> Net Lot: {format_int(latest.net_lots, signed=True)} lot",
-                f"> Net Value: {format_rp(latest.net_value, signed=True)}",
+                (
+                    f"> Net Lot: "
+                    f"{format_int(
+                        latest.net_lots,
+                        signed=True,
+                    )} lot"
+                ),
+                (
+                    f"> Net Value: "
+                    f"{format_rp(
+                        latest.net_value,
+                        signed=True,
+                    )}"
+                ),
                 f"> Flow: {latest.flow}",
-                "",
             ]
         )
+
+        buyers, sellers = top_brokers(
+            latest_brokers,
+            field="net_value",
+            n=3,
+        )
+
+        flow_upper = str(
+            latest.flow
+        ).upper()
+
+        # ================================================
+        # ACCUMULATION
+        # ================================================
+
+        if "ACCUMULATION" in flow_upper:
+
+            lines.extend(
+                [
+                    "",
+                    "🟢 DOMINANT BUYER",
+                ]
+            )
+
+            for idx, row in enumerate(
+                buyers,
+                start=1,
+            ):
+                avg_buy = _broker_avg_buy(
+                    row
+                )
+
+                lines.append(
+                    (
+                        f"{idx}. "
+                        f"{row.get('broker', '-')}"
+                        f" | "
+                        f"{format_rp(
+                            row.get('net_value', 0),
+                            signed=True,
+                        )}"
+                        f" | "
+                        f"{format_int(
+                            row.get('net_lots', 0),
+                            signed=True,
+                        )} lot"
+                        f" | Avg Buy "
+                        f"{format_price(avg_buy)}"
+                    )
+                )
+
+        # ================================================
+        # DISTRIBUTION
+        # ================================================
+
+        elif "DISTRIBUTION" in flow_upper:
+
+            lines.extend(
+                [
+                    "",
+                    "🔴 DOMINANT SELLER",
+                ]
+            )
+
+            for idx, row in enumerate(
+                sellers,
+                start=1,
+            ):
+                avg_sell = _broker_avg_sell(
+                    row
+                )
+
+                lines.append(
+                    (
+                        f"{idx}. "
+                        f"{row.get('broker', '-')}"
+                        f" | "
+                        f"{format_rp(
+                            row.get('net_value', 0),
+                            signed=True,
+                        )}"
+                        f" | "
+                        f"{format_int(
+                            row.get('net_lots', 0),
+                            signed=True,
+                        )} lot"
+                        f" | Avg Sell "
+                        f"{format_price(avg_sell)}"
+                    )
+                )
+
+        # ================================================
+        # MIXED / NEUTRAL
+        # ================================================
+
+        else:
+
+            if buyers:
+                lines.extend(
+                    [
+                        "",
+                        "🟢 TOP BUYER",
+                    ]
+                )
+
+                for idx, row in enumerate(
+                    buyers,
+                    start=1,
+                ):
+                    avg_buy = _broker_avg_buy(
+                        row
+                    )
+
+                    lines.append(
+                        (
+                            f"{idx}. "
+                            f"{row.get('broker', '-')}"
+                            f" | "
+                            f"{format_rp(
+                                row.get('net_value', 0),
+                                signed=True,
+                            )}"
+                            f" | Avg Buy "
+                            f"{format_price(avg_buy)}"
+                        )
+                    )
+
+            if sellers:
+                lines.extend(
+                    [
+                        "",
+                        "🔴 TOP SELLER",
+                    ]
+                )
+
+                for idx, row in enumerate(
+                    sellers,
+                    start=1,
+                ):
+                    avg_sell = _broker_avg_sell(
+                        row
+                    )
+
+                    lines.append(
+                        (
+                            f"{idx}. "
+                            f"{row.get('broker', '-')}"
+                            f" | "
+                            f"{format_rp(
+                                row.get('net_value', 0),
+                                signed=True,
+                            )}"
+                            f" | Avg Sell "
+                            f"{format_price(avg_sell)}"
+                        )
+                    )
+
+        lines.append("")
 
     summary20, brokers20 = period_data.get("20D", (None, []))
     if summary20 and brokers20:
@@ -1180,63 +1484,269 @@ def format_value_report(ticker: str) -> str:
     return "\n".join(lines).strip()
 
 
-def format_broker_report(ticker: str, period: str = "20D") -> str:
+def format_broker_report(
+    ticker: str,
+    period: str = "20D",
+) -> str:
+
     ticker = normalize_ticker(ticker)
-    summary, brokers = aggregate_period(ticker, period)
+    period = period.upper()
+
+    summary, brokers = aggregate_period(
+        ticker,
+        period,
+    )
 
     if not summary:
-        return f"❌ Tidak ada broker data {period} untuk {ticker}."
+        return (
+            f"❌ Tidak ada broker data "
+            f"{period} untuk {ticker}."
+        )
 
-    buy_value, sell_value = top_brokers(
+    last_price, price_source = (
+        get_latest_price(ticker)
+    )
+
+    buyers, sellers = top_brokers(
         brokers,
         field="net_value",
         n=5,
     )
-    buy_lots, sell_lots = top_brokers(
-        brokers,
-        field="net_lots",
-        n=5,
+
+    total_positive_value = sum(
+        float(row.get("net_value", 0) or 0)
+        for row in brokers
+        if float(
+            row.get("net_value", 0) or 0
+        ) > 0
+    )
+
+    total_negative_value = sum(
+        abs(
+            float(
+                row.get("net_value", 0) or 0
+            )
+        )
+        for row in brokers
+        if float(
+            row.get("net_value", 0) or 0
+        ) < 0
     )
 
     lines = [
-        f"🏦 BROKER DOMINANCE — {ticker} {period}",
-        f"Period: {summary.start_date} → {summary.end_date}",
-        "",
-        "TOP NET BUY — VALUE",
+        (
+            f"🏦 BROKER DOMINANCE — "
+            f"{ticker} {period}"
+        ),
+        (
+            f"Period: "
+            f"{summary.start_date} "
+            f"→ {summary.end_date}"
+        ),
+        f"Flow: {summary.flow}",
     ]
 
-    for r in buy_value:
-        lines.append(
-            f"> {r['broker']}: {format_rp(r['net_value'], signed=True)} "
-            f"| {format_int(r['net_lots'], signed=True)} lot"
+    if last_price is not None:
+
+        if price_source == "ZAPI":
+            lines.append(
+                f"Latest Price: "
+                f"{format_price(last_price)}"
+            )
+
+        else:
+            lines.append(
+                f"Cached Price (fallback): "
+                f"{format_price(last_price)}"
+            )
+
+    # ====================================================
+    # TOP NET BUY
+    # ====================================================
+
+    if buyers:
+
+        lines.extend(
+            [
+                "",
+                "🟢 TOP NET BUY",
+            ]
         )
 
-    lines.append("")
-    lines.append("TOP NET SELL — VALUE")
+        for idx, row in enumerate(
+            buyers,
+            start=1,
+        ):
 
-    for r in sell_value:
-        lines.append(
-            f"> {r['broker']}: {format_rp(r['net_value'], signed=True)} "
-            f"| {format_int(r['net_lots'], signed=True)} lot"
+            net_value = float(
+                row.get("net_value", 0) or 0
+            )
+
+            net_lots = float(
+                row.get("net_lots", 0) or 0
+            )
+
+            avg_buy = _broker_avg_buy(
+                row
+            )
+
+            contribution = (
+                net_value
+                / total_positive_value
+                * 100
+                if total_positive_value
+                else 0.0
+            )
+
+            price_vs_avg = (
+                _price_vs_avg_pct(
+                    last_price,
+                    avg_buy,
+                )
+            )
+
+            lines.append(
+                (
+                    f"{idx}. "
+                    f"{row.get('broker', '-')}"
+                )
+            )
+
+            lines.append(
+                (
+                    f"   Net Value: "
+                    f"{format_rp(
+                        net_value,
+                        signed=True,
+                    )}"
+                )
+            )
+
+            lines.append(
+                (
+                    f"   Net Lot: "
+                    f"{format_int(
+                        net_lots,
+                        signed=True,
+                    )} lot"
+                )
+            )
+
+            lines.append(
+                (
+                    f"   Avg Buy: "
+                    f"{format_price(avg_buy)}"
+                )
+            )
+
+            lines.append(
+                (
+                    f"   Contribution: "
+                    f"{contribution:.2f}%"
+                )
+            )
+
+            if price_vs_avg is not None:
+                lines.append(
+                    (
+                        f"   Price vs Avg Buy: "
+                        f"{price_vs_avg:+.2f}%"
+                    )
+                )
+
+    # ====================================================
+    # TOP NET SELL
+    # ====================================================
+
+    if sellers:
+
+        lines.extend(
+            [
+                "",
+                "🔴 TOP NET SELL",
+            ]
         )
 
-    lines.append("")
-    lines.append("TOP NET BUY — LOT")
+        for idx, row in enumerate(
+            sellers,
+            start=1,
+        ):
 
-    for r in buy_lots:
-        lines.append(
-            f"> {r['broker']}: {format_int(r['net_lots'], signed=True)} lot "
-            f"| {format_rp(r['net_value'], signed=True)}"
-        )
+            net_value = float(
+                row.get("net_value", 0) or 0
+            )
 
-    lines.append("")
-    lines.append("TOP NET SELL — LOT")
+            net_lots = float(
+                row.get("net_lots", 0) or 0
+            )
 
-    for r in sell_lots:
-        lines.append(
-            f"> {r['broker']}: {format_int(r['net_lots'], signed=True)} lot "
-            f"| {format_rp(r['net_value'], signed=True)}"
-        )
+            avg_sell = _broker_avg_sell(
+                row
+            )
+
+            contribution = (
+                abs(net_value)
+                / total_negative_value
+                * 100
+                if total_negative_value
+                else 0.0
+            )
+
+            price_vs_avg = (
+                _price_vs_avg_pct(
+                    last_price,
+                    avg_sell,
+                )
+            )
+
+            lines.append(
+                (
+                    f"{idx}. "
+                    f"{row.get('broker', '-')}"
+                )
+            )
+
+            lines.append(
+                (
+                    f"   Net Value: "
+                    f"{format_rp(
+                        net_value,
+                        signed=True,
+                    )}"
+                )
+            )
+
+            lines.append(
+                (
+                    f"   Net Lot: "
+                    f"{format_int(
+                        net_lots,
+                        signed=True,
+                    )} lot"
+                )
+            )
+
+            lines.append(
+                (
+                    f"   Avg Sell: "
+                    f"{format_price(avg_sell)}"
+                )
+            )
+
+            lines.append(
+                (
+                    f"   Contribution: "
+                    f"{contribution:.2f}%"
+                )
+            )
+
+            if price_vs_avg is not None:
+                lines.append(
+                    (
+                        f"   Price vs Avg Sell: "
+                        f"{price_vs_avg:+.2f}%"
+                    )
+                )
 
     return "\n".join(lines)
 
