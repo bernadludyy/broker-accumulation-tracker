@@ -1837,7 +1837,10 @@ Commands:
 → Audit histori SQLite
 
 /refresh BBRI
-→ Isi data terbaru/gap
+→ Update data terbaru + repair gap satu ticker
+
+/refresh ALL
+→ Update seluruh ticker di watchlist + repair gap
 
 /help
 → Bantuan
@@ -1882,6 +1885,179 @@ def authorized(chat_id: str) -> bool:
         return False
     return str(chat_id) == str(TELEGRAM_CHAT_ID)
 
+def refresh_all_watchlist(
+    chat_id: str,
+) -> str:
+    tickers = load_watchlist()
+
+    if not tickers:
+        return "📋 Watchlist kosong."
+
+    total = len(tickers)
+    target_date = safe_end_date()
+
+    success: list[dict[str, Any]] = []
+    partial: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+
+    send_telegram(
+        (
+            "⏳ REFRESH ALL DIMULAI\n"
+            f"> Total Ticker: {total}\n"
+            f"> Target Date: {target_date}"
+        ),
+        chat_id,
+    )
+
+    for idx, ticker in enumerate(
+        tickers,
+        start=1,
+    ):
+        try:
+            send_telegram(
+                (
+                    f"⏳ [{idx}/{total}] "
+                    f"Refresh {ticker}..."
+                ),
+                chat_id,
+            )
+
+            result = update_ticker_history(
+                ticker,
+                full_ytd_if_new=False,
+                repair_gaps=True,
+            )
+
+            after = result.get("after", {})
+
+            last_date = after.get(
+                "last_date"
+            )
+
+            trading_days = int(
+                after.get("trading_days", 0)
+                or 0
+            )
+
+            gap_after = int(
+                result.get("gap_after", 0)
+                or 0
+            )
+
+            row = {
+                "ticker": ticker,
+                "last_date": last_date,
+                "trading_days": trading_days,
+                "gap_after": gap_after,
+            }
+
+            if (
+                last_date == target_date
+                and gap_after == 0
+            ):
+                success.append(row)
+
+                send_telegram(
+                    (
+                        f"✅ [{idx}/{total}] "
+                        f"{ticker}\n"
+                        f"> Last: {last_date}\n"
+                        f"> Gap: {gap_after}"
+                    ),
+                    chat_id,
+                )
+
+            else:
+                partial.append(row)
+
+                send_telegram(
+                    (
+                        f"⚠️ [{idx}/{total}] "
+                        f"{ticker} PARTIAL\n"
+                        f"> Last: {last_date}\n"
+                        f"> Target: {target_date}\n"
+                        f"> Gap: {gap_after}"
+                    ),
+                    chat_id,
+                )
+
+        except Exception as exc:
+            failed.append(
+                {
+                    "ticker": ticker,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                }
+            )
+
+            send_telegram(
+                (
+                    f"❌ [{idx}/{total}] "
+                    f"{ticker} FAILED\n"
+                    f"> {type(exc).__name__}: "
+                    f"{exc}"
+                ),
+                chat_id,
+            )
+
+    checkpoint_db()
+
+    lines = [
+        "✅ REFRESH ALL SELESAI",
+        "",
+        f"> Target Date: {target_date}",
+        f"> Total Ticker: {total}",
+        f"> Success: {len(success)}",
+        f"> Partial: {len(partial)}",
+        f"> Failed: {len(failed)}",
+    ]
+
+    if success:
+        lines.extend(
+            [
+                "",
+                "✅ SUCCESS",
+                ", ".join(
+                    row["ticker"]
+                    for row in success
+                ),
+            ]
+        )
+
+    if partial:
+        lines.extend(
+            [
+                "",
+                "⚠️ PARTIAL",
+            ]
+        )
+
+        for row in partial:
+            lines.append(
+                (
+                    f"> {row['ticker']} "
+                    f"| Last {row['last_date']} "
+                    f"| Gap {row['gap_after']}"
+                )
+            )
+
+    if failed:
+        lines.extend(
+            [
+                "",
+                "❌ FAILED",
+            ]
+        )
+
+        for row in failed:
+            lines.append(
+                (
+                    f"> {row['ticker']} "
+                    f"| {row['error_type']}"
+                )
+            )
+
+    return "\n".join(lines)
 
 def command_result(text: str, chat_id: str) -> str:
     raw = text.strip()
@@ -1905,11 +2081,31 @@ def command_result(text: str, chat_id: str) -> str:
             for i, ticker in enumerate(tickers, start=1)
         )
 
-    if first_lower in {"/add", "/remove", "/status", "/refresh", "/ticker"}:
+    if first_lower in {
+        "/add",
+        "/remove",
+        "/status",
+        "/refresh",
+        "/ticker",
+    }:
         if len(parts) < 2:
             return f"Format: {first_lower} TICKER"
 
-        ticker = normalize_ticker(parts[1])
+        target = parts[1].strip().upper()
+
+        # /refresh ALL harus diproses sebelum
+        # ALL dianggap sebagai kode ticker.
+        if (
+            first_lower == "/refresh"
+            and target == "ALL"
+        ):
+            return refresh_all_watchlist(
+                chat_id
+            )
+
+        ticker = normalize_ticker(
+            target
+        )
 
         if first_lower == "/add":
             ok, reason = validate_ticker_with_api(ticker)
