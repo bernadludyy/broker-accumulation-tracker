@@ -29,6 +29,14 @@ export default {
 
     const chatId = String(message.chat?.id ?? "");
 
+    console.log("Telegram update", {
+      update_id: update.update_id,
+      chat_id: chatId,
+      text: message.text,
+      expected_chat_id: String(env.TELEGRAM_CHAT_ID),
+      chat_match: chatId === String(env.TELEGRAM_CHAT_ID)
+    });
+
     if (
       env.TELEGRAM_CHAT_ID &&
       chatId !== String(env.TELEGRAM_CHAT_ID)
@@ -46,6 +54,11 @@ export default {
         { status: 500 }
       );
     }
+
+    console.log("GitHub dispatch target", {
+      owner,
+      repo
+    });
 
     const response = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/dispatches`,
@@ -66,6 +79,8 @@ export default {
         })
       }
     );
+
+    console.log("GitHub dispatch status", response.status);
 
     if (!response.ok) {
       const body = await response.text();
