@@ -53,6 +53,63 @@ def db_connect() -> sqlite3.Connection:
 def ensure_schema() -> None:
     tracker.init_db(str(DB_PATH))
 
+    with db_connect() as con:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS telegram_processed_updates (
+                update_id INTEGER PRIMARY KEY,
+                chat_id TEXT NOT NULL,
+                command_text TEXT,
+                processed_at TEXT NOT NULL
+                    DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+        con.commit()
+
+def claim_telegram_update(
+    update_id: int | None,
+    chat_id: str,
+    command_text: str,
+) -> bool:
+    """
+    Claim Telegram update_id secara atomik.
+
+    True:
+        update belum pernah diproses.
+
+    False:
+        update_id sudah pernah diproses,
+        sehingga command harus diabaikan.
+    """
+
+    if update_id is None:
+        # Manual/non-standard event tidak memakai
+        # duplicate protection.
+        return True
+
+    with db_connect() as con:
+        cursor = con.execute(
+            """
+            INSERT OR IGNORE INTO telegram_processed_updates (
+                update_id,
+                chat_id,
+                command_text
+            )
+            VALUES (?, ?, ?)
+            """,
+            (
+                int(update_id),
+                str(chat_id),
+                str(command_text),
+            ),
+        )
+
+        con.commit()
+
+        return cursor.rowcount == 1
+
 
 def checkpoint_db() -> None:
     if not DB_PATH.exists():
@@ -2246,29 +2303,91 @@ def command_result(text: str, chat_id: str) -> str:
     return HELP_TEXT
 
 
-def process_telegram_update(update: dict[str, Any]) -> int:
-    text, chat_id, _update_id = extract_message(update)
+def process_telegram_update(
+    update: dict[str, Any],
+) -> int:
+
+    text, chat_id, update_id = extract_message(
+        update
+    )
 
     if not authorized(chat_id):
-        print(f"Ignored unauthorized chat_id={chat_id}")
+        print(
+            f"Ignored unauthorized "
+            f"chat_id={chat_id}"
+        )
         return 0
 
+    # ========================================================
+    # DUPLICATE PROTECTION
+    # ========================================================
+
     try:
-        result = command_result(text, chat_id)
-        send_telegram(result, chat_id)
-        checkpoint_db()
-        return 0
+        is_new = claim_telegram_update(
+            update_id,
+            chat_id,
+            text,
+        )
 
     except Exception as exc:
         traceback.print_exc()
+
         try:
             send_telegram(
-                "❌ Bot mengalami error.\n"
-                f"{type(exc).__name__}: {exc}",
+                (
+                    "❌ BOT PROTECTION ERROR\n"
+                    f"{type(exc).__name__}: {exc}\n\n"
+                    "Command tidak dijalankan."
+                ),
                 chat_id,
             )
         except Exception:
             pass
+
+        return 1
+
+    if not is_new:
+        print(
+            "Ignored duplicate Telegram update "
+            f"update_id={update_id} "
+            f"chat_id={chat_id}"
+        )
+
+        return 0
+
+    # ========================================================
+    # PROCESS COMMAND
+    # ========================================================
+
+    try:
+        result = command_result(
+            text,
+            chat_id,
+        )
+
+        send_telegram(
+            result,
+            chat_id,
+        )
+
+        checkpoint_db()
+
+        return 0
+
+    except Exception as exc:
+        traceback.print_exc()
+
+        try:
+            send_telegram(
+                (
+                    "❌ Bot mengalami error.\n"
+                    f"{type(exc).__name__}: {exc}"
+                ),
+                chat_id,
+            )
+        except Exception:
+            pass
+
         return 1
 
 

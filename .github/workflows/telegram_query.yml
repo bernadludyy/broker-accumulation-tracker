@@ -78,7 +78,6 @@ jobs:
           git config user.name "broker-bot-actions"
           git config user.email "broker-bot-actions@users.noreply.github.com"
 
-          # DB may be ignored locally, so force-add it.
           if [ -f broker_tracker.db ]; then
             git add -f broker_tracker.db
           fi
@@ -92,3 +91,38 @@ jobs:
 
           git commit -m "bot: persist broker data [skip ci]"
           git push
+
+      - name: Notify Telegram on workflow failure
+        if: failure()
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          EVENT_NAME: ${{ github.event_name }}
+          MANUAL_TEXT: ${{ inputs.text }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        shell: bash
+        run: |
+          COMMAND="Unknown command"
+
+          if [ "$EVENT_NAME" = "repository_dispatch" ]; then
+            COMMAND="$(jq -r '
+              .client_payload.telegram_update.message.text //
+              .client_payload.telegram_update.edited_message.text //
+              "Unknown command"
+            ' "$GITHUB_EVENT_PATH")"
+          elif [ -n "$MANUAL_TEXT" ]; then
+            COMMAND="$MANUAL_TEXT"
+          fi
+
+          MESSAGE=$(printf \
+          "❌ BOT ERROR\n\nStage: GitHub Actions\nCommand: %s\nStatus: FAILED\n\nRun: https://github.com/%s/actions/runs/%s" \
+          "$COMMAND" \
+          "$REPOSITORY" \
+          "$RUN_ID")
+
+          curl --fail-with-body -sS \
+            -X POST \
+            "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${CHAT_ID}" \
+            --data-urlencode "text=${MESSAGE}"
