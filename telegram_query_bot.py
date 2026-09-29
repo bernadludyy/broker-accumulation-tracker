@@ -547,9 +547,43 @@ def aggregate_period(
     return summary, broker_rows
 
 
-def cached_last_price(ticker: str) -> float | None:
+def get_latest_price(
+    ticker: str,
+) -> tuple[float | None, str]:
     ticker = normalize_ticker(ticker)
 
+    # ========================================================
+    # 1. PRIORITAS: FRESH LAST PRICE DARI ZAPI SUMMARY
+    # ========================================================
+    try:
+        payload = tracker.fetch_multi_quote([ticker])
+
+        if isinstance(payload, dict):
+            items = payload.get("items", [])
+
+            if items:
+                item = items[0]
+
+                raw_price = item.get("lastPrice")
+
+                if raw_price is not None:
+                    price = float(
+                        str(raw_price)
+                        .replace(",", "")
+                        .strip()
+                    )
+
+                    if price > 0:
+                        return price, "ZAPI"
+
+    except Exception as exc:
+        print(
+            f"[PRICE] Fresh price {ticker} gagal: {exc}"
+        )
+
+    # ========================================================
+    # 2. FALLBACK: CACHE SQLITE
+    # ========================================================
     try:
         with db_connect() as con:
             row = con.execute(
@@ -563,10 +597,16 @@ def cached_last_price(ticker: str) -> float | None:
                 """,
                 (ticker,),
             ).fetchone()
-        return float(row[0]) if row and row[0] is not None else None
-    except sqlite3.Error:
-        return None
 
+        if row and row[0] is not None:
+            return float(row[0]), "CACHE"
+
+    except sqlite3.Error as exc:
+        print(
+            f"[PRICE] Cache price {ticker} gagal: {exc}"
+        )
+
+    return None, "NONE"
 
 def latest_daily_summary(ticker: str) -> PeriodSummary | None:
     ticker = normalize_ticker(ticker)
@@ -694,7 +734,7 @@ def format_full_report(ticker: str) -> str:
             f"Ketik /add {ticker} untuk menambahkan + backfill YTD."
         )
 
-    price = cached_last_price(ticker)
+    price, price_source = get_latest_price(ticker)
 
     lines = [
         f"📊 BROKER SUMMARY — {ticker}",
@@ -709,7 +749,15 @@ def format_full_report(ticker: str) -> str:
     ]
 
     if price is not None:
-        lines.append(f"Cached Last Price: {format_price(price)}")
+        if price_source == "ZAPI":
+            lines.append(
+                f"Latest Price: {format_price(price)}"
+            )
+        else:
+            lines.append(
+                f"Cached Last Price (fallback): "
+                f"{format_price(price)}"
+            )
 
     lines.append("")
 
@@ -854,16 +902,22 @@ def _dominant_broker_by_value(
 
 def format_value_report(ticker: str) -> str:
     ticker = normalize_ticker(ticker)
-    last_price = cached_last_price(ticker)
+    last_price, price_source = get_latest_price(ticker)
 
     lines = [
         f"💰 VALUE FLOW — {ticker}",
     ]
 
     if last_price is not None:
-        lines.append(
-            f"Cached Last Price: {format_price(last_price)}"
-        )
+        if price_source == "ZAPI":
+            lines.append(
+                f"Latest Price: {format_price(last_price)}"
+            )
+        else:
+            lines.append(
+                f"Cached Last Price (fallback): "
+                f"{format_price(last_price)}"
+            )
 
     lines.append("")
 
