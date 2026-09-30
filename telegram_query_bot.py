@@ -1246,6 +1246,142 @@ def _price_vs_avg_pct(
 
     return ((last_price / avg_price) - 1) * 100
 
+def format_daily_broker_report(
+    ticker: str,
+) -> str:
+    ticker = normalize_ticker(ticker)
+
+    summary, brokers = latest_daily_broker_data(
+        ticker
+    )
+
+    if not summary or not brokers:
+        return (
+            f"❌ Tidak ada data broker harian "
+            f"untuk {ticker}."
+        )
+
+    last_price, price_source = get_latest_price(
+        ticker
+    )
+
+    buyers, sellers = top_brokers(
+        brokers,
+        field="net_value",
+        n=5,
+    )
+
+    lines = [
+        f"📅 DAILY BROKER SUMMARY — {ticker}",
+        f"Date: {summary.end_date}",
+    ]
+
+    if last_price is not None:
+        if price_source == "ZAPI":
+            lines.append(
+                f"Latest Price: {format_price(last_price)}"
+            )
+        else:
+            lines.append(
+                f"Cached Price (fallback): "
+                f"{format_price(last_price)}"
+            )
+
+    lines.extend(
+        [
+            "",
+            f"Flow: {summary.flow}",
+            "",
+            "TOTAL FLOW",
+            f"> Buy Value: {format_rp(summary.buy_value)}",
+            f"> Sell Value: {format_rp(summary.sell_value)}",
+            (
+                f"> Net Value: "
+                f"{format_rp(summary.net_value, signed=True)}"
+            ),
+            (
+                f"> Buy/Sell Lot: "
+                f"{format_int(summary.buy_lots)} / "
+                f"{format_int(summary.sell_lots)}"
+            ),
+            (
+                f"> Net Lot: "
+                f"{format_int(summary.net_lots, signed=True)} lot"
+            ),
+            (
+                f"> Avg Buy/Sell: "
+                f"{format_price(summary.avg_buy_price)} / "
+                f"{format_price(summary.avg_sell_price)}"
+            ),
+        ]
+    )
+
+    if buyers:
+        lines.extend(
+            [
+                "",
+                "🟢 TOP NET BUY",
+            ]
+        )
+
+        for idx, row in enumerate(
+            buyers,
+            start=1,
+        ):
+            avg_buy = _broker_avg_buy(row)
+
+            lines.append(
+                (
+                    f"{idx}. {row.get('broker', '-')}"
+                    f" | "
+                    f"{format_rp(
+                        row.get('net_value', 0),
+                        signed=True,
+                    )}"
+                    f" | "
+                    f"{format_int(
+                        row.get('net_lots', 0),
+                        signed=True,
+                    )} lot"
+                    f" | Avg Buy "
+                    f"{format_price(avg_buy)}"
+                )
+            )
+
+    if sellers:
+        lines.extend(
+            [
+                "",
+                "🔴 TOP NET SELL",
+            ]
+        )
+
+        for idx, row in enumerate(
+            sellers,
+            start=1,
+        ):
+            avg_sell = _broker_avg_sell(row)
+
+            lines.append(
+                (
+                    f"{idx}. {row.get('broker', '-')}"
+                    f" | "
+                    f"{format_rp(
+                        row.get('net_value', 0),
+                        signed=True,
+                    )}"
+                    f" | "
+                    f"{format_int(
+                        row.get('net_lots', 0),
+                        signed=True,
+                    )} lot"
+                    f" | Avg Sell "
+                    f"{format_price(avg_sell)}"
+                )
+            )
+
+    return "\n".join(lines)
+
 def format_broker_code_report(
     ticker: str,
     broker_code: str,
@@ -1859,6 +1995,9 @@ Query:
 ADRO
 → Full 5D/10D/20D/YTD + Lot + Value
 
+ADRO TODAY
+→ Broker summary khusus 1 hari perdagangan terakhir
+
 ADRO 5D
 ADRO 10D
 ADRO 20D
@@ -2259,6 +2398,11 @@ def command_result(text: str, chat_id: str) -> str:
     # BKSL CC NI 10D
     # BKSL CC NI 20D
     # BKSL CC NI YTD
+
+    if "DAILY" in tokens or "TODAY" in tokens:
+        return format_daily_broker_report(
+            ticker
+        )
 
     if "CC" in tokens:
         cc_index = tokens.index("CC")
