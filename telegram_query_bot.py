@@ -1690,18 +1690,22 @@ def format_foreign_netbuy(
             "Close",
         )
 
+        buy_value = foreign_buy * close
+        sell_value = foreign_sell * close
+        net_value = net_foreign * close
+
         normalized.append(
             {
                 "code": code,
-                "buy": foreign_buy,
-                "sell": foreign_sell,
-                "net": net_foreign,
+                "buy_value": buy_value,
+                "sell_value": sell_value,
+                "net_value": net_value,
                 "close": close,
             }
         )
 
     normalized.sort(
-        key=lambda x: x["net"],
+        key=lambda x: x["net_value"],
         reverse=True,
     )
 
@@ -1711,8 +1715,8 @@ def format_foreign_netbuy(
         "🌍 FOREIGN NET BUY — IDX",
         f"Data: {data_date or 'latest trading day'}",
         (
-            "Source: IDX foreign-flow "
-            "(unit: shares)"
+            "Value Basis: Close × Foreign Shares "
+            "(estimated)"
         ),
         "",
     ]
@@ -1734,20 +1738,19 @@ def format_foreign_netbuy(
                     f"| Close {format_price(row['close'])}"
                 ),
                 (
-                    f"> Foreign Buy: "
-                    f"{format_int(row['buy'])} shares"
+                    f"> Foreign Buy Value: "
+                    f"{format_rp(row['buy_value'])}"
                 ),
                 (
-                    f"> Foreign Sell: "
-                    f"{format_int(row['sell'])} shares"
+                    f"> Foreign Sell Value: "
+                    f"{format_rp(row['sell_value'])}"
                 ),
                 (
-                    f"> Net Foreign: "
-                    f"{format_int(row['net'], signed=True)} shares"
-                ),
-                (
-                    f"> Net Foreign Lot: "
-                    f"{format_int(row['net'] / 100, signed=True)} lot"
+                    f"> Net Foreign Value: "
+                    f"{format_rp(
+                        row['net_value'],
+                        signed=True,
+                    )}"
                 ),
                 "",
             ]
@@ -1817,11 +1820,21 @@ def format_foreign_ticker(
         "Close",
     )
 
+    foreign_buy_value = (
+        foreign_buy * close
+    )
+    foreign_sell_value = (
+        foreign_sell * close
+    )
+    net_foreign_value = (
+        net_foreign * close
+    )
+
     flow = (
         "NET FOREIGN BUY"
-        if net_foreign > 0
+        if net_foreign_value > 0
         else "NET FOREIGN SELL"
-        if net_foreign < 0
+        if net_foreign_value < 0
         else "NEUTRAL"
     )
 
@@ -1833,22 +1846,25 @@ def format_foreign_ticker(
             f"Flow: {flow}",
             "",
             (
-                f"> Foreign Buy: "
-                f"{format_int(foreign_buy)} shares"
+                f"> Foreign Buy Value: "
+                f"{format_rp(foreign_buy_value)}"
             ),
             (
-                f"> Foreign Sell: "
-                f"{format_int(foreign_sell)} shares"
+                f"> Foreign Sell Value: "
+                f"{format_rp(foreign_sell_value)}"
             ),
             (
-                f"> Net Foreign: "
-                f"{format_int(net_foreign, signed=True)} shares"
-            ),
-            (
-                f"> Net Foreign Lot: "
-                f"{format_int(net_foreign / 100, signed=True)} lot"
+                f"> Net Foreign Value: "
+                f"{format_rp(
+                    net_foreign_value,
+                    signed=True,
+                )}"
             ),
             "",
+            (
+                "Value Basis: Close × Foreign Shares "
+                "(estimated)"
+            ),
             "Catatan: command ini memakai 1 request ZAPI.",
         ]
     )
@@ -3194,10 +3210,10 @@ CC NI DISTRIB 20D
 → Scan saham yang sedang didistribusi broker NI pada watchlist
 
 FOREIGN NETBUY
-→ Top foreign net buy IDX hari bursa terbaru
+→ Top foreign net buy value IDX hari bursa terbaru
 
 ADRO FOREIGN
-→ Foreign buy/sell/net saham ADRO hari bursa terbaru
+→ Foreign buy/sell/net value saham ADRO hari bursa terbaru
 
 SMARTMONEY
 SMARTMONEY 5D
