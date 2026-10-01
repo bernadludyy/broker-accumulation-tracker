@@ -1509,6 +1509,316 @@ def format_broker_code_report(
 
     return "\n".join(lines)
 
+
+def _broker_row_by_code(
+    broker_rows: list[dict[str, Any]],
+    broker_code: str,
+) -> dict[str, Any] | None:
+    broker_code = broker_code.strip().upper()
+
+    return next(
+        (
+            row
+            for row in broker_rows
+            if str(row.get("broker", "")).upper()
+            == broker_code
+        ),
+        None,
+    )
+
+
+def _broker_net_buy(
+    row: dict[str, Any] | None,
+) -> bool:
+    if not row:
+        return False
+
+    return (
+        float(row.get("net_value", 0) or 0) > 0
+        and
+        float(row.get("net_lots", 0) or 0) > 0
+    )
+
+
+def _broker_net_sell(
+    row: dict[str, Any] | None,
+) -> bool:
+    if not row:
+        return False
+
+    return (
+        float(row.get("net_value", 0) or 0) < 0
+        and
+        float(row.get("net_lots", 0) or 0) < 0
+    )
+
+
+def format_broker_market_scan(
+    broker_code: str,
+    period: str = "5D",
+    mode: str = "ACCUM",
+    limit: int = 10,
+) -> str:
+    broker_code = broker_code.strip().upper()
+    period = period.strip().upper()
+    mode = mode.strip().upper()
+
+    if not re.fullmatch(r"[A-Z0-9]{2,5}", broker_code):
+        return (
+            "❌ Kode broker tidak valid.\n"
+            "Contoh: CC NI ACCUM 5D"
+        )
+
+    if period not in {"5D", "10D", "20D", "YTD"}:
+        return (
+            "❌ Period tidak valid.\n"
+            "Gunakan 5D, 10D, 20D, atau YTD."
+        )
+
+    if mode not in {"ACCUM", "DISTRIB"}:
+        return "❌ Mode harus ACCUM atau DISTRIB."
+
+    tickers = load_watchlist()
+
+    if not tickers:
+        return "📋 Watchlist aktif kosong."
+
+    results: list[dict[str, Any]] = []
+
+    for ticker in tickers:
+        summary, broker_rows = aggregate_period(
+            ticker,
+            period,
+        )
+
+        if not summary:
+            continue
+
+        selected_row = _broker_row_by_code(
+            broker_rows,
+            broker_code,
+        )
+
+        if not selected_row:
+            continue
+
+        selected_match = (
+            _broker_net_buy(selected_row)
+            if mode == "ACCUM"
+            else _broker_net_sell(selected_row)
+        )
+
+        if not selected_match:
+            continue
+
+        _, rows_5d = aggregate_period(
+            ticker,
+            "5D",
+        )
+        _, rows_20d = aggregate_period(
+            ticker,
+            "20D",
+        )
+        _, rows_today = latest_daily_broker_data(
+            ticker
+        )
+
+        row_5d = _broker_row_by_code(
+            rows_5d,
+            broker_code,
+        )
+        row_20d = _broker_row_by_code(
+            rows_20d,
+            broker_code,
+        )
+        row_today = _broker_row_by_code(
+            rows_today,
+            broker_code,
+        )
+
+        if mode == "ACCUM":
+            is_5d = _broker_net_buy(row_5d)
+            is_20d = _broker_net_buy(row_20d)
+            is_today = _broker_net_buy(row_today)
+
+            if is_5d and is_20d:
+                strength = "🟢 STRONG"
+            elif is_today and is_5d:
+                strength = "🟡 EARLY"
+            else:
+                strength = "🔵 ACTIVE"
+
+            avg_price = _broker_avg_buy(
+                selected_row
+            )
+
+        else:
+            is_5d = _broker_net_sell(row_5d)
+            is_20d = _broker_net_sell(row_20d)
+            is_today = _broker_net_sell(row_today)
+
+            if is_5d and is_20d:
+                strength = "🔴 STRONG"
+            elif is_today and is_5d:
+                strength = "🟠 EARLY"
+            else:
+                strength = "⚪ ACTIVE"
+
+            avg_price = _broker_avg_sell(
+                selected_row
+            )
+
+        net_value = float(
+            selected_row.get("net_value", 0)
+            or 0
+        )
+        net_lots = float(
+            selected_row.get("net_lots", 0)
+            or 0
+        )
+
+        today_net_lots = (
+            float(
+                row_today.get("net_lots", 0)
+                or 0
+            )
+            if row_today
+            else 0.0
+        )
+
+        net_20d_lots = (
+            float(
+                row_20d.get("net_lots", 0)
+                or 0
+            )
+            if row_20d
+            else 0.0
+        )
+
+        results.append(
+            {
+                "ticker": ticker,
+                "strength": strength,
+                "net_value": net_value,
+                "net_lots": net_lots,
+                "avg_price": avg_price,
+                "today_net_lots":
+                    today_net_lots,
+                "net_20d_lots":
+                    net_20d_lots,
+            }
+        )
+
+    if mode == "ACCUM":
+        results.sort(
+            key=lambda x:
+            float(x["net_value"]),
+            reverse=True,
+        )
+        title = "BROKER ACCUMULATION"
+        action_text = "Net Buy"
+        avg_text = "Weighted Avg Buy"
+    else:
+        results.sort(
+            key=lambda x:
+            abs(float(x["net_value"])),
+            reverse=True,
+        )
+        title = "BROKER DISTRIBUTION"
+        action_text = "Net Sell"
+        avg_text = "Weighted Avg Sell"
+
+    shown = results[:max(1, int(limit))]
+
+    lines = [
+        (
+            f"🏦 {title} — "
+            f"{broker_code} | {period}"
+        ),
+        (
+            f"Scope: Active Watchlist "
+            f"({len(tickers)} ticker)"
+        ),
+        f"Found: {len(results)}",
+        "",
+    ]
+
+    if not shown:
+        lines.extend(
+            [
+                (
+                    f"Tidak ada saham dengan "
+                    f"{action_text.lower()} "
+                    f"{broker_code} pada {period}."
+                ),
+                "",
+                (
+                    "Catatan: scan hanya mencakup "
+                    "ticker di watchlist aktif Bot 1."
+                ),
+            ]
+        )
+
+        return "\n".join(lines)
+
+    for index, row in enumerate(
+        shown,
+        start=1,
+    ):
+        lines.extend(
+            [
+                (
+                    f"{index}. "
+                    f"{row['ticker']} | "
+                    f"{row['strength']}"
+                ),
+                (
+                    f"> {action_text}: "
+                    f"{format_rp(
+                        row['net_value'],
+                        signed=True,
+                    )}"
+                ),
+                (
+                    f"> Net Lot: "
+                    f"{format_int(
+                        row['net_lots'],
+                        signed=True,
+                    )} lot"
+                ),
+                (
+                    f"> {avg_text}: "
+                    f"{format_price(
+                        row['avg_price']
+                    )}"
+                ),
+                (
+                    f"> Today Net: "
+                    f"{format_int(
+                        row['today_net_lots'],
+                        signed=True,
+                    )} lot"
+                ),
+                (
+                    f"> 20D Net: "
+                    f"{format_int(
+                        row['net_20d_lots'],
+                        signed=True,
+                    )} lot"
+                ),
+                "",
+            ]
+        )
+
+    lines.append(
+        (
+            "🟢 STRONG = 5D + 20D searah | "
+            "🟡/🟠 EARLY = Today + 5D searah"
+        )
+    )
+
+    return "\n".join(lines)
+
 def _dominant_broker_by_value(
     brokers: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
@@ -2391,6 +2701,67 @@ def command_result(text: str, chat_id: str) -> str:
 
         if first_lower == "/ticker":
             return format_full_report(ticker)
+
+    # Global broker scan:
+    # CC NI ACCUM
+    # CC NI ACCUM 20D
+    # CC NI DISTRIB
+    if first_lower == "cc":
+        if len(parts) < 3:
+            return (
+                "❌ Format salah.\n"
+                "Contoh: CC NI ACCUM 5D"
+            )
+
+        broker_code = (
+            parts[1]
+            .strip()
+            .upper()
+        )
+
+        scan_action = (
+            parts[2]
+            .strip()
+            .upper()
+        )
+
+        period = next(
+            (
+                p.upper()
+                for p in parts[3:]
+                if p.upper()
+                in {"5D", "10D", "20D", "YTD"}
+            ),
+            "5D",
+        )
+
+        if scan_action in {
+            "ACCUM",
+            "ACCUMULATION",
+            "AKUM",
+            "AKUMULASI",
+        }:
+            return format_broker_market_scan(
+                broker_code,
+                period,
+                "ACCUM",
+            )
+
+        if scan_action in {
+            "DISTRIB",
+            "DISTRIBUTION",
+            "DISTRIBUSI",
+        }:
+            return format_broker_market_scan(
+                broker_code,
+                period,
+                "DISTRIB",
+            )
+
+        return (
+            "❌ Action tidak dikenali.\n"
+            "Gunakan ACCUM atau DISTRIB."
+        )
 
     # Free-form:
     # ADRO
