@@ -2082,8 +2082,25 @@ def format_smart_money_scan(
 
     shown = results[:max(1, int(limit))]
 
+    range_line = "Range Data: -"
+
+    if results:
+        range_start = min(
+            row["start_date"]
+            for row in results
+        )
+        range_end = max(
+            row["end_date"]
+            for row in results
+        )
+        range_line = (
+            f"Range Data: "
+            f"{range_start} → {range_end}"
+        )
+
     lines = [
         f"🧠 SMART MONEY FLOW — {period}",
+        range_line,
         (
             f"Scope: Active Watchlist "
             f"({len(tickers)} ticker)"
@@ -3166,6 +3183,15 @@ ADRO CC NI 10D
 ADRO CC NI 20D
 ADRO CC NI YTD
 → AVG Buy/Sell + Net Value/Lot broker tertentu
+
+CC NI ACCUM
+CC NI ACCUM 5D
+CC NI ACCUM 20D
+→ Scan saham yang sedang diakumulasi broker NI pada watchlist
+
+CC NI DISTRIB
+CC NI DISTRIB 20D
+→ Scan saham yang sedang didistribusi broker NI pada watchlist
 
 FOREIGN NETBUY
 → Top foreign net buy IDX hari bursa terbaru
