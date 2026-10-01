@@ -1756,10 +1756,6 @@ def format_foreign_netbuy(
             ]
         )
 
-    lines.append(
-        "Catatan: command ini memakai 1 request ZAPI."
-    )
-
     return "\n".join(lines)
 
 
@@ -1861,11 +1857,6 @@ def format_foreign_ticker(
                 )}"
             ),
             "",
-            (
-                "Value Basis: Close × Foreign Shares "
-                "(estimated)"
-            ),
-            "Catatan: command ini memakai 1 request ZAPI.",
         ]
     )
 
@@ -2183,14 +2174,6 @@ def format_smart_money_scan(
             ]
         )
 
-    lines.append(
-        (
-            "Catatan: 'smart money' adalah "
-            "heuristic broker-flow, bukan "
-            "identifikasi market maker resmi."
-        )
-    )
-
     return "\n".join(lines)
 
 
@@ -2278,10 +2261,6 @@ def format_smart_money_ticker(
                 else "Price vs Top Buyer Avg: -"
             ),
             "",
-            (
-                "Catatan: ini heuristic broker-flow, "
-                "bukan identifikasi market maker resmi."
-            ),
         ]
     )
 
