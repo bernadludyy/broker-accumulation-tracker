@@ -159,6 +159,31 @@ def fetch_stock_history(
         },
     )
 
+
+def fetch_foreign_flow(
+    date: str | None = None,
+    code: str | None = None,
+    sort: str = "net",
+    length: int = 50,
+    start: int = 0,
+) -> dict:
+    params: dict = {
+        "sort": sort,
+        "length": int(length),
+        "start": int(start),
+    }
+
+    if date:
+        params["date"] = date
+
+    if code:
+        params["code"] = code.upper().strip()
+
+    return _get_idx(
+        "foreign-flow",
+        params,
+    )
+
 def fetch_broker_summary(
     ticker: str,
     start_date: str,
