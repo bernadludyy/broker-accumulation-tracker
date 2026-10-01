@@ -1584,6 +1584,7 @@ def format_broker_market_scan(
         return "📋 Watchlist aktif kosong."
 
     results: list[dict[str, Any]] = []
+    scan_ranges: list[tuple[str, str]] = []
 
     for ticker in tickers:
         summary, broker_rows = aggregate_period(
@@ -1593,6 +1594,13 @@ def format_broker_market_scan(
 
         if not summary:
             continue
+
+        scan_ranges.append(
+            (
+                summary.start_date,
+                summary.end_date,
+            )
+        )
 
         selected_row = _broker_row_by_code(
             broker_rows,
@@ -1699,6 +1707,8 @@ def format_broker_market_scan(
             {
                 "ticker": ticker,
                 "strength": strength,
+                "start_date": summary.start_date,
+                "end_date": summary.end_date,
                 "net_value": net_value,
                 "net_lots": net_lots,
                 "avg_price": avg_price,
@@ -1730,11 +1740,42 @@ def format_broker_market_scan(
 
     shown = results[:max(1, int(limit))]
 
+    range_line = "Range Data: -"
+
+    if scan_ranges:
+        unique_ranges = sorted(
+            set(scan_ranges)
+        )
+
+        if len(unique_ranges) == 1:
+            range_start, range_end = (
+                unique_ranges[0]
+            )
+            range_line = (
+                f"Range Data: "
+                f"{range_start} → {range_end}"
+            )
+        else:
+            range_start = min(
+                item[0]
+                for item in scan_ranges
+            )
+            range_end = max(
+                item[1]
+                for item in scan_ranges
+            )
+            range_line = (
+                f"Range Data: "
+                f"{range_start} → {range_end} "
+                f"(range per ticker dapat berbeda)"
+            )
+
     lines = [
         (
             f"🏦 {title} — "
             f"{broker_code} | {period}"
         ),
+        range_line,
         (
             f"Scope: Active Watchlist "
             f"({len(tickers)} ticker)"
@@ -1771,6 +1812,11 @@ def format_broker_market_scan(
                     f"{index}. "
                     f"{row['ticker']} | "
                     f"{row['strength']}"
+                ),
+                (
+                    f"> Data: "
+                    f"{row['start_date']} "
+                    f"→ {row['end_date']}"
                 ),
                 (
                     f"> {action_text}: "
