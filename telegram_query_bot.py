@@ -1640,83 +1640,255 @@ def _foreign_number(
     return 0.0
 
 
-def format_foreign_netbuy(
-    limit: int = 10,
-) -> str:
-    payload = tracker.fetch_foreign_flow(
-        sort="net",
-        length=max(20, int(limit)),
-        start=0,
+
+def _latest_market_trade_dates(
+    count: int,
+) -> list[str]:
+    with db_connect() as con:
+        rows = con.execute(
+            """
+            SELECT DISTINCT trade_date
+            FROM broker_daily
+            ORDER BY trade_date DESC
+            LIMIT ?
+            """,
+            (max(1, int(count)),),
+        ).fetchall()
+
+    dates = [
+        str(row[0])
+        for row in rows
+    ]
+
+    dates.reverse()
+    return dates
+
+
+def _stock_summary_rows(
+    payload: Any,
+) -> list[dict[str, Any]]:
+    if isinstance(payload, list):
+        return [
+            row
+            for row in payload
+            if isinstance(row, dict)
+        ]
+
+    if not isinstance(payload, dict):
+        return []
+
+    rows = (
+        payload.get("data")
+        or payload.get("items")
+        or []
     )
 
-    rows, data_date = _foreign_items(
-        payload
-    )
+    if not isinstance(rows, list):
+        return []
+
+    return [
+        row
+        for row in rows
+        if isinstance(row, dict)
+    ]
+
+def format_foreign_netbuy(
+    limit: int = 10,
+    period: str = "1D",
+) -> str:
+    period = period.strip().upper()
+
+    if period not in {"1D", "5D"}:
+        return (
+            "❌ Period FOREIGN NETBUY "
+            "hanya 1D atau 5D."
+        )
 
     normalized: list[dict[str, Any]] = []
 
-    for row in rows:
-        code = str(
-            row.get("code")
-            or row.get("Code")
-            or ""
-        ).upper().strip()
-
-        if not code:
-            continue
-
-        foreign_buy = _foreign_number(
-            row,
-            "foreignBuyShares",
-            "ForeignBuyShares",
-        )
-        foreign_sell = _foreign_number(
-            row,
-            "foreignSellShares",
-            "ForeignSellShares",
-        )
-        net_foreign = _foreign_number(
-            row,
-            "netForeignShares",
-            "NetForeignShares",
+    if period == "1D":
+        payload = tracker.fetch_foreign_flow(
+            sort="net",
+            length=max(20, int(limit)),
+            start=0,
         )
 
-        if net_foreign <= 0:
-            continue
-
-        close = _foreign_number(
-            row,
-            "close",
-            "Close",
+        rows, data_date = _foreign_items(
+            payload
         )
 
-        buy_value = foreign_buy * close
-        sell_value = foreign_sell * close
-        net_value = net_foreign * close
+        for row in rows:
+            code = str(
+                row.get("code")
+                or row.get("Code")
+                or ""
+            ).upper().strip()
 
-        normalized.append(
-            {
-                "code": code,
-                "buy_value": buy_value,
-                "sell_value": sell_value,
-                "net_value": net_value,
-                "close": close,
-            }
+            if not code:
+                continue
+
+            foreign_buy = _foreign_number(
+                row,
+                "foreignBuyShares",
+                "ForeignBuyShares",
+            )
+            foreign_sell = _foreign_number(
+                row,
+                "foreignSellShares",
+                "ForeignSellShares",
+            )
+            net_foreign = _foreign_number(
+                row,
+                "netForeignShares",
+                "NetForeignShares",
+            )
+
+            if net_foreign <= 0:
+                continue
+
+            close = _foreign_number(
+                row,
+                "close",
+                "Close",
+            )
+
+            normalized.append(
+                {
+                    "code": code,
+                    "buy_value":
+                        foreign_buy * close,
+                    "sell_value":
+                        foreign_sell * close,
+                    "net_value":
+                        net_foreign * close,
+                    "close": close,
+                }
+            )
+
+        range_line = (
+            f"Data: "
+            f"{data_date or 'latest trading day'}"
+        )
+
+    else:
+        dates = _latest_market_trade_dates(
+            5
+        )
+
+        if len(dates) < 5:
+            return (
+                "❌ Data tanggal bursa di database "
+                "belum cukup untuk FOREIGN NETBUY 5D."
+            )
+
+        aggregate: dict[
+            str,
+            dict[str, Any],
+        ] = {}
+
+        for trade_date in dates:
+            payload = tracker.fetch_stock_summary(
+                date=trade_date,
+                length=5000,
+                start=0,
+            )
+
+            for row in _stock_summary_rows(
+                payload
+            ):
+                code = str(
+                    row.get("StockCode")
+                    or row.get("stockCode")
+                    or row.get("code")
+                    or ""
+                ).upper().strip()
+
+                if not code:
+                    continue
+
+                close = _foreign_number(
+                    row,
+                    "Close",
+                    "close",
+                )
+                foreign_buy = _foreign_number(
+                    row,
+                    "ForeignBuy",
+                    "foreignBuy",
+                )
+                foreign_sell = _foreign_number(
+                    row,
+                    "ForeignSell",
+                    "foreignSell",
+                )
+
+                buy_value = (
+                    foreign_buy * close
+                )
+                sell_value = (
+                    foreign_sell * close
+                )
+                net_value = (
+                    buy_value - sell_value
+                )
+
+                item = aggregate.setdefault(
+                    code,
+                    {
+                        "code": code,
+                        "buy_value": 0.0,
+                        "sell_value": 0.0,
+                        "net_value": 0.0,
+                        "close": close,
+                    },
+                )
+
+                item["buy_value"] += (
+                    buy_value
+                )
+                item["sell_value"] += (
+                    sell_value
+                )
+                item["net_value"] += (
+                    net_value
+                )
+
+                if trade_date == dates[-1]:
+                    item["close"] = close
+
+        normalized = [
+            row
+            for row in aggregate.values()
+            if float(
+                row.get("net_value", 0)
+                or 0
+            ) > 0
+        ]
+
+        range_line = (
+            f"Range Data: "
+            f"{dates[0]} → {dates[-1]}"
         )
 
     normalized.sort(
-        key=lambda x: x["net_value"],
+        key=lambda x:
+        float(x["net_value"]),
         reverse=True,
     )
 
-    shown = normalized[:max(1, int(limit))]
+    shown = normalized[
+        :max(1, int(limit))
+    ]
 
     lines = [
-        "🌍 FOREIGN NET BUY — IDX",
-        f"Data: {data_date or 'latest trading day'}",
         (
-            "Value Basis: Close × Foreign Shares "
-            "(estimated)"
+            f"🌍 FOREIGN NET BUY — IDX "
+            f"| {period}"
+        ),
+        range_line,
+        (
+            "Value Basis: Daily Close × "
+            "Foreign Shares"
         ),
         "",
     ]
@@ -1735,15 +1907,20 @@ def format_foreign_netbuy(
             [
                 (
                     f"{index}. {row['code']} "
-                    f"| Close {format_price(row['close'])}"
+                    f"| Close "
+                    f"{format_price(row['close'])}"
                 ),
                 (
                     f"> Foreign Buy Value: "
-                    f"{format_rp(row['buy_value'])}"
+                    f"{format_rp(
+                        row['buy_value']
+                    )}"
                 ),
                 (
                     f"> Foreign Sell Value: "
-                    f"{format_rp(row['sell_value'])}"
+                    f"{format_rp(
+                        row['sell_value']
+                    )}"
                 ),
                 (
                     f"> Net Foreign Value: "
@@ -1761,69 +1938,98 @@ def format_foreign_netbuy(
 
 def format_foreign_ticker(
     ticker: str,
+    period: str = "1D",
 ) -> str:
     ticker = normalize_ticker(ticker)
+    period = period.strip().upper()
 
-    payload = tracker.fetch_foreign_flow(
-        code=ticker,
-        sort="net",
-        length=20,
-        start=0,
+    length_map = {
+        "1D": 1,
+        "5D": 5,
+        "10D": 10,
+        "20D": 20,
+    }
+
+    if period not in length_map:
+        return (
+            "❌ Period foreign tidak valid.\n"
+            "Gunakan 1D, 5D, 10D, atau 20D."
+        )
+
+    payload = tracker.fetch_stock_history(
+        ticker,
+        length=length_map[period],
     )
 
-    rows, data_date = _foreign_items(
-        payload
-    )
-
-    row = next(
-        (
-            item
-            for item in rows
-            if str(
-                item.get("code")
-                or item.get("Code")
-                or ""
-            ).upper().strip()
-            == ticker
-        ),
-        rows[0] if rows else None,
-    )
-
-    if not row:
+    if not isinstance(payload, dict):
         return (
             f"❌ Foreign flow {ticker} "
             "tidak tersedia."
         )
 
-    foreign_buy = _foreign_number(
-        row,
-        "foreignBuyShares",
-        "ForeignBuyShares",
-    )
-    foreign_sell = _foreign_number(
-        row,
-        "foreignSellShares",
-        "ForeignSellShares",
-    )
-    net_foreign = _foreign_number(
-        row,
-        "netForeignShares",
-        "NetForeignShares",
-    )
-    close = _foreign_number(
-        row,
-        "close",
-        "Close",
+    items = payload.get("items") or []
+
+    if not isinstance(items, list):
+        items = []
+
+    rows = [
+        row
+        for row in items
+        if isinstance(row, dict)
+    ]
+
+    if not rows:
+        return (
+            f"❌ Foreign flow {ticker} "
+            f"{period} tidak tersedia."
+        )
+
+    rows.sort(
+        key=lambda row:
+        str(row.get("date") or "")
     )
 
-    foreign_buy_value = (
-        foreign_buy * close
+    foreign_buy_value = sum(
+        _foreign_number(
+            row,
+            "foreignBuyValue",
+            "ForeignBuyValue",
+        )
+        for row in rows
     )
-    foreign_sell_value = (
-        foreign_sell * close
+    foreign_sell_value = sum(
+        _foreign_number(
+            row,
+            "foreignSellValue",
+            "ForeignSellValue",
+        )
+        for row in rows
     )
-    net_foreign_value = (
-        net_foreign * close
+    net_foreign_value = sum(
+        _foreign_number(
+            row,
+            "netForeignValue",
+            "NetForeignValue",
+        )
+        for row in rows
+    )
+
+    first_date = str(
+        rows[0].get("date")
+        or payload.get("from")
+        or "-"
+    )[:10]
+
+    last_date = str(
+        rows[-1].get("date")
+        or payload.get("to")
+        or "-"
+    )[:10]
+
+    latest_close = _foreign_number(
+        rows[-1],
+        "close",
+        "Close",
     )
 
     flow = (
@@ -1834,31 +2040,39 @@ def format_foreign_ticker(
         else "NEUTRAL"
     )
 
-    return "\n".join(
-        [
-            f"🌍 FOREIGN FLOW — {ticker}",
-            f"Data: {data_date or 'latest trading day'}",
-            f"Close: {format_price(close)}",
-            f"Flow: {flow}",
-            "",
-            (
-                f"> Foreign Buy Value: "
-                f"{format_rp(foreign_buy_value)}"
-            ),
-            (
-                f"> Foreign Sell Value: "
-                f"{format_rp(foreign_sell_value)}"
-            ),
-            (
-                f"> Net Foreign Value: "
-                f"{format_rp(
-                    net_foreign_value,
-                    signed=True,
-                )}"
-            ),
-            "",
-        ]
-    )
+    lines = [
+        (
+            f"🌍 FOREIGN FLOW — "
+            f"{ticker} | {period}"
+        ),
+        (
+            f"Range Data: "
+            f"{first_date} → {last_date}"
+        ),
+        (
+            f"Latest Close: "
+            f"{format_price(latest_close)}"
+        ),
+        f"Flow: {flow}",
+        "",
+        (
+            f"> Foreign Buy Value: "
+            f"{format_rp(foreign_buy_value)}"
+        ),
+        (
+            f"> Foreign Sell Value: "
+            f"{format_rp(foreign_sell_value)}"
+        ),
+        (
+            f"> Net Foreign Value: "
+            f"{format_rp(
+                net_foreign_value,
+                signed=True,
+            )}"
+        ),
+    ]
+
+    return "\n".join(lines)
 
 
 def _smart_money_snapshot(
@@ -3194,6 +3408,14 @@ FOREIGN NETBUY
 ADRO FOREIGN
 → Foreign buy/sell/net value saham ADRO hari bursa terbaru
 
+ADRO FOREIGN 5D
+ADRO FOREIGN 10D
+ADRO FOREIGN 20D
+→ Akumulasi foreign flow berdasarkan exact value periode
+
+FOREIGN ADRO 5D
+→ Format alternatif untuk foreign flow 5D
+
 SMARTMONEY
 SMARTMONEY 5D
 SMARTMONEY 20D
@@ -3572,14 +3794,42 @@ def command_result(text: str, chat_id: str) -> str:
                 "BUY",
                 "TOPBUY",
             }:
-                return format_foreign_netbuy()
+                period = next(
+                    (
+                        p.upper()
+                        for p in parts[2:]
+                        if p.upper()
+                        in {"1D", "5D"}
+                    ),
+                    "1D",
+                )
+
+                return format_foreign_netbuy(
+                    period=period
+                )
 
             if re.fullmatch(
                 r"[A-Z0-9]{2,12}",
                 action,
             ):
+                period = next(
+                    (
+                        p.upper()
+                        for p in parts[2:]
+                        if p.upper()
+                        in {
+                            "1D",
+                            "5D",
+                            "10D",
+                            "20D",
+                        }
+                    ),
+                    "1D",
+                )
+
                 return format_foreign_ticker(
-                    action
+                    action,
+                    period,
                 )
 
         return (
@@ -3710,8 +3960,23 @@ def command_result(text: str, chat_id: str) -> str:
     # BKSL CC NI YTD
 
     if "FOREIGN" in tokens:
+        period = next(
+            (
+                p
+                for p in (
+                    "1D",
+                    "5D",
+                    "10D",
+                    "20D",
+                )
+                if p in tokens
+            ),
+            "1D",
+        )
+
         return format_foreign_ticker(
-            ticker
+            ticker,
+            period,
         )
 
     if (

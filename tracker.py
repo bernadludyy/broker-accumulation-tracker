@@ -145,6 +145,29 @@ def _get_idx(
     return result
 
 
+
+def fetch_stock_summary(
+    date: str | None = None,
+    code: str | None = None,
+    length: int = 5000,
+    start: int = 0,
+) -> dict:
+    params: dict = {
+        "length": int(length),
+        "start": int(start),
+    }
+
+    if date:
+        params["date"] = date
+
+    if code:
+        params["code"] = code.upper().strip()
+
+    return _get_idx(
+        "stock-summary",
+        params,
+    )
+
 def fetch_stock_history(
     ticker: str,
     length: int = 100,
