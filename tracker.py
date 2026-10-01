@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 ZPI_BASE_URL = "https://api.zpi.web.id/v1/finance:pluang"
+ZPI_IDX_BASE_URL = "https://api.zapi.ink/v1/finance:idx"
 API_KEY = os.getenv("ZPI_API_KEY", "")
 DB_PATH = os.getenv("DB_PATH", "broker_tracker.db")
 
@@ -118,6 +119,45 @@ def _get(path: str, params: dict, timeout: int = 30) -> dict:
 
     return result
 
+
+
+def _get_idx(
+    path: str,
+    params: dict,
+    timeout: int = 30,
+) -> dict:
+    url = f"{ZPI_IDX_BASE_URL}/{path}"
+
+    r = requests.get(
+        url,
+        headers=_headers(),
+        params=params,
+        timeout=timeout,
+    )
+
+    r.raise_for_status()
+
+    result = r.json()
+
+    if isinstance(result, dict) and "data" in result:
+        return result["data"]
+
+    return result
+
+
+def fetch_stock_history(
+    ticker: str,
+    length: int = 100,
+) -> dict:
+    ticker = ticker.upper().strip()
+
+    return _get_idx(
+        "stock-history",
+        {
+            "code": ticker,
+            "length": int(length),
+        },
+    )
 
 def fetch_broker_summary(
     ticker: str,

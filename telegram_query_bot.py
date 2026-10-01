@@ -18,6 +18,7 @@ import requests
 from dotenv import load_dotenv
 
 import tracker
+from entry_engine import format_scanner_report
 
 load_dotenv()
 
@@ -1998,6 +1999,18 @@ ADRO
 ADRO TODAY
 → Broker summary khusus 1 hari perdagangan terakhir
 
+ADRO ENTRY
+→ Entry Scanner BEI, default SWING
+
+ADRO ENTRY SWING
+→ Entry plan swing + broker flow + scoring
+
+ADRO ENTRY DAYTRADE
+→ Entry plan mode daytrade
+
+ADRO TODAY
+→ Broker summary khusus 1 hari perdagangan terakhir
+
 ADRO 5D
 ADRO 10D
 ADRO 20D
@@ -2398,6 +2411,20 @@ def command_result(text: str, chat_id: str) -> str:
     # BKSL CC NI 10D
     # BKSL CC NI 20D
     # BKSL CC NI YTD
+
+    if "ENTRY" in tokens:
+        mode = "SWING"
+
+        if "DAYTRADE" in tokens:
+            mode = "DAYTRADE"
+
+        elif "SWING" in tokens:
+            mode = "SWING"
+
+        return format_scanner_report(
+            ticker,
+            mode,
+        )
 
     if "DAILY" in tokens or "TODAY" in tokens:
         return format_daily_broker_report(
