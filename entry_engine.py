@@ -468,9 +468,9 @@ def classify_setup_score(score: int) -> str:
     return "WEAK SETUP"
 
 
-def build_entry_score(ticker: str, mode: str = "SWING") -> dict[str, Any]:
+def build_entry_score(ticker: str, mode: str = "SWING", *, history: pd.DataFrame | None = None) -> dict[str, Any]:
     ticker = ticker.upper().strip()
-    df = add_indicators(load_stock_history(ticker, 100))
+    df = add_indicators(history if history is not None else load_stock_history(ticker, 100))
     data = analyze_entry(ticker, mode, history=df)
     latest = df.iloc[-1]
     previous = df.iloc[-2] if len(df) >= 2 else latest
@@ -766,4 +766,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
