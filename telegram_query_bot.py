@@ -1897,11 +1897,6 @@ def format_broker_market_scan(
                     f"{row['strength']}"
                 ),
                 (
-                    f"> Data: "
-                    f"{row['start_date']} "
-                    f"→ {row['end_date']}"
-                ),
-                (
                     f"> {action_text}: "
                     f"{format_rp(
                         row['net_value'],
