@@ -1572,6 +1572,705 @@ def format_broker_code_report(
     return "\n".join(lines)
 
 
+
+def _foreign_items(
+    payload: Any,
+) -> tuple[list[dict[str, Any]], str | None]:
+    if isinstance(payload, list):
+        return (
+            [
+                row
+                for row in payload
+                if isinstance(row, dict)
+            ],
+            None,
+        )
+
+    if not isinstance(payload, dict):
+        return [], None
+
+    rows = (
+        payload.get("data")
+        or payload.get("items")
+        or []
+    )
+
+    if not isinstance(rows, list):
+        rows = []
+
+    date_value = (
+        payload.get("date")
+        or payload.get("tradeDate")
+    )
+
+    date_text = (
+        str(date_value)[:10]
+        if date_value
+        else None
+    )
+
+    return (
+        [
+            row
+            for row in rows
+            if isinstance(row, dict)
+        ],
+        date_text,
+    )
+
+
+def _foreign_number(
+    row: dict[str, Any],
+    *keys: str,
+) -> float:
+    for key in keys:
+        value = row.get(key)
+        if value is None:
+            continue
+
+        try:
+            return float(
+                str(value)
+                .replace(",", "")
+                .strip()
+            )
+        except (TypeError, ValueError):
+            continue
+
+    return 0.0
+
+
+def format_foreign_netbuy(
+    limit: int = 10,
+) -> str:
+    payload = tracker.fetch_foreign_flow(
+        sort="net",
+        length=max(20, int(limit)),
+        start=0,
+    )
+
+    rows, data_date = _foreign_items(
+        payload
+    )
+
+    normalized: list[dict[str, Any]] = []
+
+    for row in rows:
+        code = str(
+            row.get("code")
+            or row.get("Code")
+            or ""
+        ).upper().strip()
+
+        if not code:
+            continue
+
+        foreign_buy = _foreign_number(
+            row,
+            "foreignBuyShares",
+            "ForeignBuyShares",
+        )
+        foreign_sell = _foreign_number(
+            row,
+            "foreignSellShares",
+            "ForeignSellShares",
+        )
+        net_foreign = _foreign_number(
+            row,
+            "netForeignShares",
+            "NetForeignShares",
+        )
+
+        if net_foreign <= 0:
+            continue
+
+        close = _foreign_number(
+            row,
+            "close",
+            "Close",
+        )
+
+        normalized.append(
+            {
+                "code": code,
+                "buy": foreign_buy,
+                "sell": foreign_sell,
+                "net": net_foreign,
+                "close": close,
+            }
+        )
+
+    normalized.sort(
+        key=lambda x: x["net"],
+        reverse=True,
+    )
+
+    shown = normalized[:max(1, int(limit))]
+
+    lines = [
+        "🌍 FOREIGN NET BUY — IDX",
+        f"Data: {data_date or 'latest trading day'}",
+        (
+            "Source: IDX foreign-flow "
+            "(unit: shares)"
+        ),
+        "",
+    ]
+
+    if not shown:
+        lines.append(
+            "Tidak ada data foreign net buy."
+        )
+        return "\n".join(lines)
+
+    for index, row in enumerate(
+        shown,
+        start=1,
+    ):
+        lines.extend(
+            [
+                (
+                    f"{index}. {row['code']} "
+                    f"| Close {format_price(row['close'])}"
+                ),
+                (
+                    f"> Foreign Buy: "
+                    f"{format_int(row['buy'])} shares"
+                ),
+                (
+                    f"> Foreign Sell: "
+                    f"{format_int(row['sell'])} shares"
+                ),
+                (
+                    f"> Net Foreign: "
+                    f"{format_int(row['net'], signed=True)} shares"
+                ),
+                (
+                    f"> Net Foreign Lot: "
+                    f"{format_int(row['net'] / 100, signed=True)} lot"
+                ),
+                "",
+            ]
+        )
+
+    lines.append(
+        "Catatan: command ini memakai 1 request ZAPI."
+    )
+
+    return "\n".join(lines)
+
+
+def format_foreign_ticker(
+    ticker: str,
+) -> str:
+    ticker = normalize_ticker(ticker)
+
+    payload = tracker.fetch_foreign_flow(
+        code=ticker,
+        sort="net",
+        length=20,
+        start=0,
+    )
+
+    rows, data_date = _foreign_items(
+        payload
+    )
+
+    row = next(
+        (
+            item
+            for item in rows
+            if str(
+                item.get("code")
+                or item.get("Code")
+                or ""
+            ).upper().strip()
+            == ticker
+        ),
+        rows[0] if rows else None,
+    )
+
+    if not row:
+        return (
+            f"❌ Foreign flow {ticker} "
+            "tidak tersedia."
+        )
+
+    foreign_buy = _foreign_number(
+        row,
+        "foreignBuyShares",
+        "ForeignBuyShares",
+    )
+    foreign_sell = _foreign_number(
+        row,
+        "foreignSellShares",
+        "ForeignSellShares",
+    )
+    net_foreign = _foreign_number(
+        row,
+        "netForeignShares",
+        "NetForeignShares",
+    )
+    close = _foreign_number(
+        row,
+        "close",
+        "Close",
+    )
+
+    flow = (
+        "NET FOREIGN BUY"
+        if net_foreign > 0
+        else "NET FOREIGN SELL"
+        if net_foreign < 0
+        else "NEUTRAL"
+    )
+
+    return "\n".join(
+        [
+            f"🌍 FOREIGN FLOW — {ticker}",
+            f"Data: {data_date or 'latest trading day'}",
+            f"Close: {format_price(close)}",
+            f"Flow: {flow}",
+            "",
+            (
+                f"> Foreign Buy: "
+                f"{format_int(foreign_buy)} shares"
+            ),
+            (
+                f"> Foreign Sell: "
+                f"{format_int(foreign_sell)} shares"
+            ),
+            (
+                f"> Net Foreign: "
+                f"{format_int(net_foreign, signed=True)} shares"
+            ),
+            (
+                f"> Net Foreign Lot: "
+                f"{format_int(net_foreign / 100, signed=True)} lot"
+            ),
+            "",
+            "Catatan: command ini memakai 1 request ZAPI.",
+        ]
+    )
+
+
+def _smart_money_snapshot(
+    ticker: str,
+    period: str,
+) -> dict[str, Any] | None:
+    ticker = normalize_ticker(ticker)
+    period = period.upper()
+
+    summary, rows = aggregate_period(
+        ticker,
+        period,
+    )
+
+    if not summary or not rows:
+        return None
+
+    buyers = [
+        row
+        for row in rows
+        if _broker_net_buy(row)
+    ]
+
+    buyers.sort(
+        key=lambda x:
+        float(x.get("net_value", 0) or 0),
+        reverse=True,
+    )
+
+    if not buyers:
+        return None
+
+    top3 = buyers[:3]
+
+    top3_net_value = sum(
+        float(row.get("net_value", 0) or 0)
+        for row in top3
+    )
+
+    turnover_buy = float(
+        summary.buy_value
+        or 0
+    )
+
+    concentration = (
+        top3_net_value / turnover_buy
+        if turnover_buy > 0
+        else 0.0
+    )
+
+    top1 = top3[0]
+    top1_buy_value = float(
+        top1.get("buy_value", 0)
+        or 0
+    )
+    top1_net_value = float(
+        top1.get("net_value", 0)
+        or 0
+    )
+    top1_intensity = (
+        top1_net_value / top1_buy_value
+        if top1_buy_value > 0
+        else 0.0
+    )
+
+    _, rows_20d = aggregate_period(
+        ticker,
+        "20D",
+    )
+    _, rows_today = latest_daily_broker_data(
+        ticker
+    )
+
+    persistent_20d = 0
+    active_today = 0
+
+    for broker_row in top3:
+        broker_code = str(
+            broker_row.get("broker", "")
+        ).upper()
+
+        if _broker_net_buy(
+            _broker_row_by_code(
+                rows_20d,
+                broker_code,
+            )
+        ):
+            persistent_20d += 1
+
+        if _broker_net_buy(
+            _broker_row_by_code(
+                rows_today,
+                broker_code,
+            )
+        ):
+            active_today += 1
+
+    if concentration >= 0.25:
+        concentration_score = 35
+    elif concentration >= 0.15:
+        concentration_score = 28
+    elif concentration >= 0.08:
+        concentration_score = 20
+    elif concentration >= 0.04:
+        concentration_score = 12
+    else:
+        concentration_score = 5
+
+    persistence_score = {
+        3: 25,
+        2: 18,
+        1: 10,
+        0: 0,
+    }[persistent_20d]
+
+    recency_score = {
+        3: 20,
+        2: 14,
+        1: 8,
+        0: 0,
+    }[active_today]
+
+    if top1_intensity >= 0.75:
+        intensity_score = 10
+    elif top1_intensity >= 0.50:
+        intensity_score = 8
+    elif top1_intensity >= 0.30:
+        intensity_score = 5
+    else:
+        intensity_score = 2
+
+    avg_buy = _broker_avg_buy(
+        top1
+    )
+    latest_price, price_date = (
+        get_latest_price_from_db(
+            ticker
+        )
+    )
+    price_vs_avg = (
+        _price_vs_avg_pct(
+            latest_price,
+            avg_buy,
+        )
+        if latest_price is not None
+        and avg_buy is not None
+        else None
+    )
+
+    if price_vs_avg is None:
+        price_score = 0
+    elif -10 <= price_vs_avg <= 5:
+        price_score = 10
+    elif -20 <= price_vs_avg <= 10:
+        price_score = 6
+    elif price_vs_avg <= 15:
+        price_score = 3
+    else:
+        price_score = 0
+
+    score = min(
+        100,
+        concentration_score
+        + persistence_score
+        + recency_score
+        + intensity_score
+        + price_score,
+    )
+
+    if score >= 75:
+        label = "🟢 STRONG FLOW"
+    elif score >= 60:
+        label = "🟢 CONFIRMED"
+    elif score >= 45:
+        label = "🟡 EARLY FLOW"
+    else:
+        label = "⚪ WATCH"
+
+    return {
+        "ticker": ticker,
+        "period": period,
+        "start_date": summary.start_date,
+        "end_date": summary.end_date,
+        "score": int(score),
+        "label": label,
+        "concentration": concentration,
+        "persistent_20d": persistent_20d,
+        "active_today": active_today,
+        "top3": top3,
+        "top3_net_value": top3_net_value,
+        "top1_avg_buy": avg_buy,
+        "latest_price": latest_price,
+        "price_date": price_date,
+        "price_vs_avg": price_vs_avg,
+    }
+
+
+def format_smart_money_scan(
+    period: str = "5D",
+    limit: int = 10,
+) -> str:
+    period = period.upper()
+
+    if period not in {"5D", "10D", "20D", "YTD"}:
+        return (
+            "❌ Period tidak valid. "
+            "Gunakan 5D, 10D, 20D, atau YTD."
+        )
+
+    tickers = load_watchlist()
+    results: list[dict[str, Any]] = []
+
+    for ticker in tickers:
+        row = _smart_money_snapshot(
+            ticker,
+            period,
+        )
+        if row:
+            results.append(row)
+
+    results.sort(
+        key=lambda x: (
+            int(x["score"]),
+            float(x["top3_net_value"]),
+        ),
+        reverse=True,
+    )
+
+    shown = results[:max(1, int(limit))]
+
+    range_line = "Range Data: -"
+
+    if results:
+        range_start = min(
+            row["start_date"]
+            for row in results
+        )
+        range_end = max(
+            row["end_date"]
+            for row in results
+        )
+        range_line = (
+            f"Range Data: "
+            f"{range_start} → {range_end}"
+        )
+
+    lines = [
+        f"🧠 SMART MONEY FLOW — {period}",
+        range_line,
+        (
+            f"Scope: Active Watchlist "
+            f"({len(tickers)} ticker)"
+        ),
+        (
+            "Model: broker concentration + "
+            "20D persistence + latest activity"
+        ),
+        "",
+    ]
+
+    if not shown:
+        lines.append(
+            "Tidak ada data smart-money flow."
+        )
+        return "\n".join(lines)
+
+    for index, row in enumerate(
+        shown,
+        start=1,
+    ):
+        top1 = row["top3"][0]
+        broker_code = str(
+            top1.get("broker", "-")
+        ).upper()
+
+        lines.extend(
+            [
+                (
+                    f"{index}. {row['ticker']} "
+                    f"| {row['score']}/100 "
+                    f"| {row['label']}"
+                ),
+                (
+                    f"> Top Buyer: {broker_code} "
+                    f"| Net {format_rp(
+                        top1.get('net_value', 0),
+                        signed=True,
+                    )}"
+                ),
+                (
+                    f"> Top3 Concentration: "
+                    f"{row['concentration']:.1%}"
+                ),
+                (
+                    f"> Persist 20D: "
+                    f"{row['persistent_20d']}/3"
+                ),
+                (
+                    f"> Active Today: "
+                    f"{row['active_today']}/3"
+                ),
+                (
+                    f"> Latest Price (DB): "
+                    f"{format_price(row['latest_price'])}"
+                ),
+                (
+                    f"> Price vs Top Buyer Avg: "
+                    f"{row['price_vs_avg']:+.2f}%"
+                    if row["price_vs_avg"] is not None
+                    else "> Price vs Top Buyer Avg: -"
+                ),
+                "",
+            ]
+        )
+
+    lines.append(
+        (
+            "Catatan: 'smart money' adalah "
+            "heuristic broker-flow, bukan "
+            "identifikasi market maker resmi."
+        )
+    )
+
+    return "\n".join(lines)
+
+
+def format_smart_money_ticker(
+    ticker: str,
+    period: str = "5D",
+) -> str:
+    row = _smart_money_snapshot(
+        ticker,
+        period,
+    )
+
+    if not row:
+        return (
+            f"❌ Data smart-money {ticker} "
+            f"{period} tidak tersedia."
+        )
+
+    lines = [
+        (
+            f"🧠 SMART MONEY — "
+            f"{row['ticker']} {row['period']}"
+        ),
+        (
+            f"Range: {row['start_date']} "
+            f"→ {row['end_date']}"
+        ),
+        (
+            f"Score: {row['score']}/100 "
+            f"| {row['label']}"
+        ),
+        (
+            f"Top3 Concentration: "
+            f"{row['concentration']:.1%}"
+        ),
+        (
+            f"Persist 20D: "
+            f"{row['persistent_20d']}/3"
+        ),
+        (
+            f"Active Today: "
+            f"{row['active_today']}/3"
+        ),
+        "",
+        "Top Net Buyers:",
+    ]
+
+    for index, broker_row in enumerate(
+        row["top3"],
+        start=1,
+    ):
+        broker_code = str(
+            broker_row.get("broker", "-")
+        ).upper()
+
+        lines.append(
+            (
+                f"> {index}. {broker_code} "
+                f"| Net {format_rp(
+                    broker_row.get('net_value', 0),
+                    signed=True,
+                )} "
+                f"| {format_int(
+                    broker_row.get('net_lots', 0),
+                    signed=True,
+                )} lot"
+            )
+        )
+
+    lines.extend(
+        [
+            "",
+            (
+                f"Top Buyer Avg: "
+                f"{format_price(row['top1_avg_buy'])}"
+            ),
+            (
+                f"Latest Price (DB): "
+                f"{format_price(row['latest_price'])}"
+            ),
+            (
+                f"Price vs Top Buyer Avg: "
+                f"{row['price_vs_avg']:+.2f}%"
+                if row["price_vs_avg"] is not None
+                else "Price vs Top Buyer Avg: -"
+            ),
+            "",
+            (
+                "Catatan: ini heuristic broker-flow, "
+                "bukan identifikasi market maker resmi."
+            ),
+        ]
+    )
+
+    return "\n".join(lines)
+
 def _broker_row_by_code(
     broker_rows: list[dict[str, Any]],
     broker_code: str,
@@ -2485,6 +3184,29 @@ ADRO CC NI 20D
 ADRO CC NI YTD
 → AVG Buy/Sell + Net Value/Lot broker tertentu
 
+CC NI ACCUM
+CC NI ACCUM 5D
+CC NI ACCUM 20D
+→ Scan saham yang sedang diakumulasi broker NI pada watchlist
+
+CC NI DISTRIB
+CC NI DISTRIB 20D
+→ Scan saham yang sedang didistribusi broker NI pada watchlist
+
+FOREIGN NETBUY
+→ Top foreign net buy IDX hari bursa terbaru
+
+ADRO FOREIGN
+→ Foreign buy/sell/net saham ADRO hari bursa terbaru
+
+SMARTMONEY
+SMARTMONEY 5D
+SMARTMONEY 20D
+→ Scan broker-flow smart money pada watchlist aktif
+
+ADRO SMARTMONEY 5D
+→ Detail smart-money flow untuk satu ticker
+
 Commands:
 /add BBRI
 → Tambah watchlist + smart YTD backfill
@@ -2845,6 +3567,72 @@ def command_result(text: str, chat_id: str) -> str:
         if first_lower == "/ticker":
             return format_full_report(ticker)
 
+    # Foreign flow (fresh IDX endpoint)
+    if first_lower == "foreign":
+        if len(parts) >= 2:
+            action = parts[1].strip().upper()
+
+            if action in {
+                "NETBUY",
+                "BUY",
+                "TOPBUY",
+            }:
+                return format_foreign_netbuy()
+
+            if re.fullmatch(
+                r"[A-Z0-9]{2,12}",
+                action,
+            ):
+                return format_foreign_ticker(
+                    action
+                )
+
+        return (
+            "❌ Format foreign salah.\n"
+            "Contoh: FOREIGN NETBUY "
+            "atau FOREIGN BBRI"
+        )
+
+    # Smart-money broker-flow scan
+    if first_lower in {
+        "smartmoney",
+        "mmflow",
+    }:
+        period = next(
+            (
+                p.upper()
+                for p in parts[1:]
+                if p.upper()
+                in {"5D", "10D", "20D", "YTD"}
+            ),
+            "5D",
+        )
+
+        return format_smart_money_scan(
+            period
+        )
+
+    # Alias: MM FLOW 5D
+    if (
+        first_lower == "mm"
+        and len(parts) >= 2
+        and parts[1].strip().upper()
+        == "FLOW"
+    ):
+        period = next(
+            (
+                p.upper()
+                for p in parts[2:]
+                if p.upper()
+                in {"5D", "10D", "20D", "YTD"}
+            ),
+            "5D",
+        )
+
+        return format_smart_money_scan(
+            period
+        )
+
     # Global broker scan:
     # CC NI ACCUM
     # CC NI ACCUM 20D
@@ -2925,6 +3713,34 @@ def command_result(text: str, chat_id: str) -> str:
     # BKSL CC NI 10D
     # BKSL CC NI 20D
     # BKSL CC NI YTD
+
+    if "FOREIGN" in tokens:
+        return format_foreign_ticker(
+            ticker
+        )
+
+    if (
+        "SMARTMONEY" in tokens
+        or "MMFLOW" in tokens
+    ):
+        period = next(
+            (
+                p
+                for p in (
+                    "5D",
+                    "10D",
+                    "20D",
+                    "YTD",
+                )
+                if p in tokens
+            ),
+            "5D",
+        )
+
+        return format_smart_money_ticker(
+            ticker,
+            period,
+        )
 
     if "ENTRY" in tokens:
         mode = "SWING"
