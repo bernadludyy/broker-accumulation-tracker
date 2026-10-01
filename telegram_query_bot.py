@@ -18,6 +18,7 @@ import requests
 from dotenv import load_dotenv
 
 import tracker
+from foreign_entry import format_foreign_entry, format_foreign_entry_scan
 from bot_io import split_message, send_message
 from entry_engine import (
     add_indicators,
@@ -4240,6 +4241,15 @@ def format_status(ticker: str) -> str:
 
 HELP_TEXT = """🤖 BROKER QUERY BOT — COMMAND LIST
 
+🌍 FOREIGN + ENTRY
+ADRO FOREIGN ENTRY
+ADRO FOREIGN ENTRY DAYTRADE
+FOREIGN ENTRY
+→ Satu saham / scan watchlist, default SWING.
+→ Foreign net 5D positif, ≥3/5 hari net buy, hari terakhir net buy.
+→ Score ≥70 (default), entry PASS, R:R ≥1,50, data lengkap.
+→ Data harian; bukan eksekusi order otomatis.
+
 📊 BROKER SUMMARY
 ADRO
 → Full summary 5D/10D/20D/YTD
@@ -4714,6 +4724,11 @@ def command_result(text: str, chat_id: str) -> str:
     if first_lower == "scalp":
         return format_scalp_tomorrow_scan()
 
+    # Combined foreign + entry checks take precedence over FOREIGN ticker syntax.
+    if first_lower == "foreign" and len(parts) >= 2 and parts[1].upper() == "ENTRY":
+        mode = "DAYTRADE" if "DAYTRADE" in [p.upper() for p in parts[2:]] else "SWING"
+        return format_foreign_entry_scan(load_watchlist(), mode)
+
     # Foreign flow (fresh IDX endpoint)
     if first_lower == "foreign":
         if len(parts) >= 2:
@@ -4893,6 +4908,10 @@ def command_result(text: str, chat_id: str) -> str:
         return format_scalp_tomorrow_ticker(
             ticker
         )
+
+    if "FOREIGN" in tokens and "ENTRY" in tokens:
+        mode = "DAYTRADE" if "DAYTRADE" in tokens else "SWING"
+        return format_foreign_entry(ticker, mode)
 
     if "FOREIGN" in tokens:
         period = next(
@@ -5121,4 +5140,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 

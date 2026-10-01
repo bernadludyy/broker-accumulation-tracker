@@ -171,3 +171,50 @@ oleh paket perbaikan ini. Setelah merge, Actions berikutnya memakai kode baru.
 
 Tes regresi memverifikasi perilaku kode dengan data sintetis. Tes ini belum
 mengukur win rate atau profitabilitas strategi dan belum merupakan uji API live.
+
+
+## FOREIGN ENTRY — foreign accumulation + entry score
+
+Perintah Telegram baru:
+
+| Perintah | Hasil |
+| --- | --- |
+| `ADRO FOREIGN ENTRY` | Pemeriksaan satu saham, default SWING |
+| `ADRO FOREIGN ENTRY DAYTRADE` | Pemeriksaan dengan parameter DAYTRADE existing, tetap data harian |
+| `FOREIGN ENTRY` | Periksa semua saham watchlist, tampilkan maksimal 10 saham lolos dengan skor tertinggi |
+| `FOREIGN ENTRY DAYTRADE` | Scan watchlist dengan parameter DAYTRADE |
+
+Syarat lolos bersamaan:
+
+1. Nilai net foreign aktual 5 observasi harga harian terakhir > 0.
+2. Minimal 3 dari 5 observasi tersebut net buy dan observasi terakhir net buy.
+3. Skor entry existing >= 70, filter entry `PASS`, R:R TP1 >= 1,50, ATR positif.
+4. Minimal 50 observasi harga valid; tanggal terakhir sama dengan tanggal aman
+   existing (cutoff 18:00 WIB, mundur akhir pekan). Broker/foreign/harga memakai
+   tanggal acuan yang sama. Foreign harus tersedia untuk kelima observasi.
+
+`FOREIGN_ENTRY_MIN_SCORE` dapat diatur melalui environment (default 70).
+Nilai foreign memakai `foreignBuyValue`/`foreignSellValue` atau `netForeignValue`
+(dan alias PascalCase). Jika pasangan buy/sell dan net sama-sama ada, nilainya
+harus konsisten. Field kosong tidak dianggap nol. Shares × close tidak dipakai
+sebagai konfirmasi. Jika upstream hanya menyediakan saham/estimasi, status tidak
+lolos sampai data nilai aktual tersedia.
+
+Status lolos menyertakan rencana entry, invalidasi/stop acuan, TP1/TP2 dan R:R.
+Level masih indikatif dari entry engine, belum dibulatkan ke fraksi harga; biaya
+transaksi belum dihitung. Status belum lolos menyebutkan penyebabnya. Scan
+melaporkan jumlah gagal diperiksa dan ticker error secara terpisah.
+
+Fitur ini dipanggil melalui query; tidak menambahkan jadwal kiriman atau eksekusi
+order. Satu request stock-history per ticker digunakan bersama oleh foreign dan
+entry engine. Scan watchlist membutuhkan satu request tersebut untuk setiap
+saham, dengan tambahan retry bila koneksi upstream terganggu. Broker menggunakan
+histori SQLite existing; bila belum lengkap, lakukan refresh lewat perintah
+existing sebelum mengecek kembali.
+
+Ambang ini adalah aturan penyaringan awal, belum hasil backtest. “Confirmed”
+berarti lolos aturan bot, bukan jaminan kenaikan. Hari libur bursa resmi belum
+terintegrasi: pemeriksaan konservatif dapat menahan sinyal saat tanggal acuan
+jatuh pada hari libur. Lima observasi terakhir juga belum diaudit terhadap
+kalender bursa lengkap. Jangan memperlakukan mode DAYTRADE berbasis candle
+harian sebagai konfirmasi harga atau volume real-time.
