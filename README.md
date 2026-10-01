@@ -37,14 +37,17 @@ Windows PowerShell:
 pip install -r requirements.txt
 ```
 
-3. Salin `.env.example` menjadi `.env` lalu isi:
+3. Buat file `.env` (jangan commit API key) lalu isi:
 
 ```env
 ZPI_API_KEY=zpi_xxxxxxxxxxxxxxxxxxxxxxxx
 DB_PATH=broker_tracker.db
 ```
 
-4. Jalankan notebook `broker_tracker.ipynb`.
+4. Jalankan `python daily_runner.py` untuk update harian.
+   Untuk query, jalankan `python telegram_query_bot.py --text "ADRO VALUE"`.
+   Kedua jalur dapat mengirim pesan ke tujuan Telegram yang dikonfigurasi; isi
+   `TELEGRAM_BOT_TOKEN` dan `TELEGRAM_CHAT_ID` melalui `.env` atau GitHub Secrets.
 
 ## Alur yang direkomendasikan
 
@@ -117,3 +120,54 @@ Untuk mengurangi bias:
 - lihat konsistensi broker dominan,
 - kombinasikan dengan harga, volume, frequency, foreign flow, dan trend,
 - backtest score sebelum dipakai untuk keputusan trading.
+
+
+
+## Perbaikan integritas data dan entry scanner
+
+- Snapshot broker harian divalidasi lalu diganti dalam satu transaksi. Broker yang
+  tidak lagi muncul pada snapshot pengganti tidak tertinggal sebagai data lama.
+  Respons kosong mempertahankan data yang ada; respons rusak ditolak. Snapshot
+  rentang beberapa hari ditolak agar tidak dihitung sebagai satu hari.
+- Entry scanner menggunakan satu pengambilan histori harga per analisis.
+  Broker flow dibatasi sampai tanggal harga, menampilkan tanggal sebenarnya,
+  dan menandai `NO DATA`, `INCOMPLETE`, atau `STALE` bila perlu. Kondisi tersebut
+  tidak mendapat poin broker dan memaksa status tunggu. Filter tunggu juga berlaku
+  pada breakout; skor tinggi tidak melewati filter ini.
+- GET API mencoba ulang maksimal tiga kali untuk timeout/koneksi terputus,
+  HTTP 429 dan HTTP 500/502/503/504. HTTP 401/403 langsung gagal.
+- Pesan Telegram daily dan query dipecah menjadi bagian maksimal 3.500 unit UTF-16,
+  termasuk baris panjang dan emoji. Setiap bagian harus dikonfirmasi `ok=true`.
+  Pengiriman tidak otomatis diulang setelah timeout, untuk mengurangi duplikasi.
+- Tanggal aman tidak melewati hari ini dan melewati akhir pekan, termasuk setelah
+  cutoff. Ini belum merupakan kalender libur bursa resmi.
+
+Pengujian offline (tanpa API key, tanpa kirim Telegram):
+
+```bash
+pip install -r requirements_github.txt
+python -m unittest discover -s tests -v
+```
+
+Workflow **Bot regression tests** menjalankan tes pada pull request/perubahan kode.
+Workflow produksi, tujuan Telegram, bobot skor, dan database historis tidak diubah
+oleh paket perbaikan ini. Setelah merge, Actions berikutnya memakai kode baru.
+
+### Batasan yang masih perlu diperhatikan
+
+- Validasi kelengkapan entry scanner membandingkan jumlah observasi dan tanggal
+  akhir; belum membuktikan tidak ada lubang tanggal di tengah periode. Data harga
+  yang sama-sama lama dengan broker juga belum terdeteksi sebagai kedaluwarsa.
+- Broker summary berisi broker teratas dan koleksi existing memakai `net=True`.
+  Rasio value/lot dari data tersebut belum boleh diasumsikan sebagai harga beli
+  bruto atau modal kepemilikan aktual tanpa verifikasi definisi upstream.
+- Snapshot lama yang sudah terlanjur tercampur tidak otomatis diperbaiki; perlu
+  pengambilan ulang tanggal terkait. Perbaikan ini berlaku saat snapshot disimpan lagi.
+- Bila sebagian pesan berhasil terkirim sebelum bagian berikutnya gagal, pengulangan
+  manual dapat mengirim ulang bagian awal. Belum ada antrean delivery per bagian.
+- Proteksi duplikat query existing mengklaim update sebelum command selesai;
+  kegagalan perlu perintah baru. Antrean query dan penyimpanan SQLite di GitHub
+  perlu peningkatan terpisah untuk beban paralel lebih besar.
+
+Tes regresi memverifikasi perilaku kode dengan data sintetis. Tes ini belum
+mengukur win rate atau profitabilitas strategi dan belum merupakan uji API live.

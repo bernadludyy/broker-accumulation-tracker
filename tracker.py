@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import math
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -11,6 +12,7 @@ from typing import Iterable, Optional
 import pandas as pd
 import requests
 from dotenv import load_dotenv
+from bot_io import get_json, send_message
 
 load_dotenv()
 
@@ -100,50 +102,11 @@ def _headers() -> dict:
 
 
 def _get(path: str, params: dict, timeout: int = 30) -> dict:
-    url = f"{ZPI_BASE_URL}/{path}"
-
-    r = requests.get(
-        url,
-        headers=_headers(),
-        params=params,
-        timeout=timeout
-    )
-
-    r.raise_for_status()
-
-    result = r.json()
-
-    # ZPI membungkus response utama di dalam key "data"
-    if isinstance(result, dict) and "data" in result:
-        return result["data"]
-
-    return result
+    return get_json(f"{ZPI_BASE_URL}/{path}", headers=_headers(), params=params, timeout=timeout)
 
 
-
-def _get_idx(
-    path: str,
-    params: dict,
-    timeout: int = 30,
-) -> dict:
-    url = f"{ZPI_IDX_BASE_URL}/{path}"
-
-    r = requests.get(
-        url,
-        headers=_headers(),
-        params=params,
-        timeout=timeout,
-    )
-
-    r.raise_for_status()
-
-    result = r.json()
-
-    if isinstance(result, dict) and "data" in result:
-        return result["data"]
-
-    return result
-
+def _get_idx(path: str, params: dict, timeout: int = 30) -> dict:
+    return get_json(f"{ZPI_IDX_BASE_URL}/{path}", headers=_headers(), params=params, timeout=timeout)
 
 
 def fetch_stock_summary(
@@ -248,43 +211,59 @@ def _parse_number(x) -> Optional[float]:
 
 
 def save_broker_snapshot(payload: dict, db_path: str = DB_PATH) -> int:
-    ticker = payload.get("code")
+    """Validate the complete daily snapshot before replacing it atomically.
+
+    Empty responses preserve existing data: they can indicate upstream delay.
+    Multi-day aggregates must never be inserted as a single daily observation.
+    """
+    if not isinstance(payload, dict):
+        raise ValueError("Broker snapshot harus berupa object.")
+    if payload.get("success") is False or payload.get("ok") is False:
+        raise ValueError("Broker snapshot gagal dari upstream.")
+    if not any(payload.get(k) for k in ("buyers", "sellers")):
+        return 0
+    ticker = str(payload.get("code") or "").strip().upper()
     trade_date = payload.get("endDate") or payload.get("startDate")
+    if not ticker or not isinstance(trade_date, str):
+        raise ValueError("Ticker/tanggal broker snapshot tidak lengkap.")
+    trade_date = date.fromisoformat(trade_date).isoformat()
+    if payload.get("startDate") and payload["startDate"] != trade_date:
+        raise ValueError("Hanya snapshot satu hari yang boleh disimpan.")
     source = payload.get("source", "pluang")
     fetched_at = datetime.now().isoformat(timespec="seconds")
-
-    rows = []
-    for side_key, side in [("buyers", "BUY"), ("sellers", "SELL")]:
-        for item in payload.get(side_key, []) or []:
-            rows.append((
-                trade_date,
-                ticker,
-                item.get("broker"),
-                side,
-                int(item.get("lots") or 0),
-                float(item.get("value") or 0),
-                _parse_number(item.get("averagePrice")),
-                source,
-                fetched_at,
-            ))
-
-    if not rows:
-        return 0
-
+    rows, seen = [], set()
+    for side_key, side in (("buyers", "BUY"), ("sellers", "SELL")):
+        items = payload.get(side_key)
+        if not isinstance(items, list):
+            raise ValueError(f"Field {side_key} harus berupa list lengkap.")
+        for item in items:
+            if not isinstance(item, dict):
+                raise ValueError("Baris broker tidak valid.")
+            broker = str(item.get("broker") or "").strip().upper()
+            lots = _parse_number(item.get("lots"))
+            value = _parse_number(item.get("value"))
+            average = _parse_number(item.get("averagePrice"))
+            if not broker or (broker, side) in seen:
+                raise ValueError("Kode broker kosong atau duplikat.")
+            if any(x is None or not math.isfinite(x) or x < 0 for x in (lots, value)):
+                raise ValueError("Lot/value harus berupa angka finite non-negatif.")
+            if lots != int(lots):
+                raise ValueError("Lot broker harus bilangan bulat.")
+            if average is not None and (not math.isfinite(average) or average < 0):
+                raise ValueError("Average price broker tidak valid.")
+            seen.add((broker, side))
+            rows.append((trade_date, ticker, broker, side, int(lots), value, average, source, fetched_at))
     con = get_connection(db_path)
-    con.executemany("""
-        INSERT INTO broker_daily
-        (trade_date, ticker, broker, side, lots, value, avg_price, source, fetched_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(trade_date, ticker, broker, side) DO UPDATE SET
-            lots=excluded.lots,
-            value=excluded.value,
-            avg_price=excluded.avg_price,
-            source=excluded.source,
-            fetched_at=excluded.fetched_at;
-    """, rows)
-    con.commit()
-    con.close()
+    try:
+        with con:
+            con.execute("DELETE FROM broker_daily WHERE trade_date=? AND ticker=?", (trade_date, ticker))
+            con.executemany("""
+                INSERT INTO broker_daily
+                (trade_date, ticker, broker, side, lots, value, avg_price, source, fetched_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, rows)
+    finally:
+        con.close()
     return len(rows)
 
 
@@ -1080,12 +1059,7 @@ def format_telegram_message(df: pd.DataFrame, lookback: int = 20, top_n: int = 1
 
 
 def send_telegram(text: str) -> dict:
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        raise RuntimeError("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID belum diisi di .env")
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    r = requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text}, timeout=30)
-    r.raise_for_status()
-    return r.json()
+    return send_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, text)
 
 
 if __name__ == "__main__":
@@ -2129,18 +2103,13 @@ def get_safe_end_date(
 
     today = now.date()
 
-    # Jika meminta tanggal hari ini tetapi belum cutoff,
-    # mundurkan satu hari kalender.
-    if requested >= today and now.hour < cutoff_hour:
-        safe_date = today - timedelta(days=1)
+    safe_date = min(requested, today)
+    if safe_date == today and now.hour < cutoff_hour:
+        safe_date -= timedelta(days=1)
+    while safe_date.weekday() >= 5:
+        safe_date -= timedelta(days=1)
+    return safe_date.isoformat()
 
-        # Mundur melewati Sabtu/Minggu
-        while safe_date.weekday() >= 5:
-            safe_date -= timedelta(days=1)
-
-        return safe_date.isoformat()
-
-    return requested_end_date
 
 def collect_missing_range(
     tickers,
