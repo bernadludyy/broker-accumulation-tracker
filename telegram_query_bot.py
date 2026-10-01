@@ -3351,15 +3351,105 @@ def format_status(ticker: str) -> str:
     )
 
 
-HELP_TEXT = """🤖 BROKER QUERY BOT
+HELP_TEXT = """🤖 BROKER QUERY BOT — COMMAND LIST
 
-Query:
+📊 BROKER SUMMARY
 ADRO
-→ Full 5D/10D/20D/YTD + Lot + Value
+→ Full summary 5D/10D/20D/YTD
 
 ADRO TODAY
-→ Broker summary khusus 1 hari perdagangan terakhir
+ADRO DAILY
+→ Broker summary 1 hari perdagangan terakhir
 
+ADRO 5D
+ADRO 10D
+ADRO 20D
+ADRO YTD
+→ Detail satu periode
+
+ADRO VALUE
+→ Buy/Sell/Net Value 5D/10D/20D/YTD
+
+ADRO BROKER
+ADRO BROKER 5D
+ADRO BROKER 10D
+ADRO BROKER 20D
+ADRO BROKER YTD
+→ Dominant broker berdasarkan Value + Lot
+→ Default: 20D
+
+ADRO CC NI
+ADRO CC NI 5D
+ADRO CC NI 10D
+ADRO CC NI 20D
+ADRO CC NI YTD
+→ Detail broker tertentu
+→ Default: 20D
+
+🏦 BROKER MARKET SCAN
+CC NI ACCUM
+CC NI ACCUM 5D
+CC NI ACCUM 10D
+CC NI ACCUM 20D
+CC NI ACCUM YTD
+→ Scan saham yang sedang diakumulasi broker NI
+→ Default: 5D
+
+CC NI DISTRIB
+CC NI DISTRIB 5D
+CC NI DISTRIB 10D
+CC NI DISTRIB 20D
+CC NI DISTRIB YTD
+→ Scan saham yang sedang didistribusi broker NI
+→ Default: 5D
+
+🌍 FOREIGN FLOW
+FOREIGN NETBUY
+→ Top foreign net buy value IDX hari bursa terbaru
+
+FOREIGN NETBUY 5D
+→ Top foreign net buy value akumulasi 5 hari bursa
+
+ADRO FOREIGN
+ADRO FOREIGN 1D
+ADRO FOREIGN 5D
+ADRO FOREIGN 10D
+ADRO FOREIGN 20D
+→ Foreign buy/sell/net value satu ticker
+→ Default: 1D
+
+FOREIGN ADRO
+FOREIGN ADRO 1D
+FOREIGN ADRO 5D
+FOREIGN ADRO 10D
+FOREIGN ADRO 20D
+→ Format alternatif foreign flow satu ticker
+
+🧠 SMART MONEY / MARKET MAKER FLOW
+SMARTMONEY
+SMARTMONEY 5D
+SMARTMONEY 10D
+SMARTMONEY 20D
+SMARTMONEY YTD
+→ Scan smart-money broker flow pada watchlist
+→ Default: 5D
+
+MMFLOW 5D
+MM FLOW 5D
+→ Alias SMARTMONEY
+
+ADRO SMARTMONEY
+ADRO SMARTMONEY 5D
+ADRO SMARTMONEY 10D
+ADRO SMARTMONEY 20D
+ADRO SMARTMONEY YTD
+→ Detail smart-money flow satu ticker
+→ Default: 5D
+
+ADRO MMFLOW 5D
+→ Alias detail smart-money satu ticker
+
+🎯 ENTRY SCANNER
 ADRO ENTRY
 → Entry Scanner BEI, default SWING
 
@@ -3369,62 +3459,7 @@ ADRO ENTRY SWING
 ADRO ENTRY DAYTRADE
 → Entry plan mode daytrade
 
-ADRO TODAY
-→ Broker summary khusus 1 hari perdagangan terakhir
-
-ADRO 5D
-ADRO 10D
-ADRO 20D
-ADRO YTD
-→ Detail per period
-
-ADRO VALUE
-→ Buy/Sell/Net Value 5D/10D/20D/YTD
-
-ADRO BROKER
-→ Dominant broker 20D berdasarkan Value + Lot
-
-ADRO CC NI
-→ Detail broker NI, default 20D
-
-ADRO CC NI 5D
-ADRO CC NI 10D
-ADRO CC NI 20D
-ADRO CC NI YTD
-→ AVG Buy/Sell + Net Value/Lot broker tertentu
-
-CC NI ACCUM
-CC NI ACCUM 5D
-CC NI ACCUM 20D
-→ Scan saham yang sedang diakumulasi broker NI pada watchlist
-
-CC NI DISTRIB
-CC NI DISTRIB 20D
-→ Scan saham yang sedang didistribusi broker NI pada watchlist
-
-FOREIGN NETBUY
-→ Top foreign net buy value IDX hari bursa terbaru
-
-ADRO FOREIGN
-→ Foreign buy/sell/net value saham ADRO hari bursa terbaru
-
-ADRO FOREIGN 5D
-ADRO FOREIGN 10D
-ADRO FOREIGN 20D
-→ Akumulasi foreign flow berdasarkan exact value periode
-
-FOREIGN ADRO 5D
-→ Format alternatif untuk foreign flow 5D
-
-SMARTMONEY
-SMARTMONEY 5D
-SMARTMONEY 20D
-→ Scan broker-flow smart money pada watchlist aktif
-
-ADRO SMARTMONEY 5D
-→ Detail smart-money flow untuk satu ticker
-
-Commands:
+🛠 WATCHLIST & DATABASE
 /add BBRI
 → Tambah watchlist + smart YTD backfill
 
@@ -3443,8 +3478,12 @@ Commands:
 /refresh ALL
 → Update seluruh ticker di watchlist + repair gap
 
+/ticker BBRI
+→ Full broker summary ticker
+
 /help
-→ Bantuan
+/start
+→ Tampilkan command list
 """
 
 
