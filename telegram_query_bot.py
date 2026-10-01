@@ -2560,14 +2560,22 @@ def _foreign_5d_from_history(
             "NetForeignValue",
         )
 
-        if (
-            day_buy != 0
-            or day_sell != 0
-            or day_net != 0
-        ):
+        row_has_exact = any(
+            key in row.index
+            for key in (
+                "foreignBuyValue",
+                "ForeignBuyValue",
+                "foreignSellValue",
+                "ForeignSellValue",
+                "netForeignValue",
+                "NetForeignValue",
+            )
+        )
+
+        if row_has_exact:
             exact_available = True
 
-        if day_net == 0 and (
+        if row_has_exact and day_net == 0 and (
             day_buy != 0
             or day_sell != 0
         ):
@@ -2575,7 +2583,7 @@ def _foreign_5d_from_history(
                 day_buy - day_sell
             )
 
-        if not exact_available:
+        if not row_has_exact:
             close = _series_number(
                 row,
                 "close",
@@ -2905,11 +2913,8 @@ def build_scalp_tomorrow_setup(
         entry_high = pullback_high
         stop_loss = max(
             1.0,
-            min(
-                support,
-                deeper_support,
-            )
-            - atr * 0.35,
+            support
+            - atr * 0.45,
         )
 
     entry_mid = (
