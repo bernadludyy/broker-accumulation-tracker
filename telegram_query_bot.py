@@ -666,6 +666,68 @@ def get_latest_price(
 
     return None, "NONE"
 
+
+def get_latest_price_from_db(
+    ticker: str,
+) -> tuple[float | None, str | None]:
+    ticker = normalize_ticker(ticker)
+
+    try:
+        with db_connect() as con:
+            row = con.execute(
+                """
+                SELECT
+                    close,
+                    trade_date
+                FROM stock_daily
+                WHERE ticker = ?
+                  AND close IS NOT NULL
+                ORDER BY trade_date DESC
+                LIMIT 1
+                """,
+                (ticker,),
+            ).fetchone()
+
+        if row and row["close"] is not None:
+            return (
+                float(row["close"]),
+                str(row["trade_date"]),
+            )
+
+    except sqlite3.Error as exc:
+        print(
+            f"[PRICE-DB] stock_daily {ticker} gagal: {exc}"
+        )
+
+    try:
+        with db_connect() as con:
+            row = con.execute(
+                """
+                SELECT
+                    last_price,
+                    scan_time
+                FROM scan_results
+                WHERE ticker = ?
+                  AND last_price IS NOT NULL
+                ORDER BY scan_time DESC
+                LIMIT 1
+                """,
+                (ticker,),
+            ).fetchone()
+
+        if row and row["last_price"] is not None:
+            return (
+                float(row["last_price"]),
+                str(row["scan_time"]),
+            )
+
+    except sqlite3.Error as exc:
+        print(
+            f"[PRICE-DB] scan_results {ticker} gagal: {exc}"
+        )
+
+    return None, None
+
 def latest_daily_broker_data(
     ticker: str,
 ) -> tuple[
@@ -1703,6 +1765,21 @@ def format_broker_market_scan(
             else 0.0
         )
 
+        latest_price, latest_price_date = (
+            get_latest_price_from_db(
+                ticker
+            )
+        )
+
+        price_vs_avg = (
+            _price_vs_avg_pct(
+                latest_price,
+                avg_price,
+            )
+            if latest_price is not None
+            else None
+        )
+
         results.append(
             {
                 "ticker": ticker,
@@ -1712,6 +1789,12 @@ def format_broker_market_scan(
                 "net_value": net_value,
                 "net_lots": net_lots,
                 "avg_price": avg_price,
+                "latest_price":
+                    latest_price,
+                "latest_price_date":
+                    latest_price_date,
+                "price_vs_avg":
+                    price_vs_avg,
                 "today_net_lots":
                     today_net_lots,
                 "net_20d_lots":
@@ -1837,6 +1920,25 @@ def format_broker_market_scan(
                     f"{format_price(
                         row['avg_price']
                     )}"
+                ),
+                (
+                    f"> Latest Price (DB): "
+                    f"{format_price(
+                        row['latest_price']
+                    )}"
+                ),
+                (
+                    f"> Price vs Avg: "
+                    f"{row['price_vs_avg']:+.2f}%"
+                    if row['price_vs_avg']
+                    is not None
+                    else "> Price vs Avg: -"
+                ),
+                (
+                    f"> Price Data: "
+                    f"{row['latest_price_date']}"
+                    if row['latest_price_date']
+                    else "> Price Data: -"
                 ),
                 (
                     f"> Today Net: "
