@@ -18,6 +18,7 @@ import requests
 from dotenv import load_dotenv
 
 import tracker
+from bot_io import split_message, send_message
 from entry_engine import (
     add_indicators,
     calculate_levels,
@@ -169,42 +170,9 @@ def format_rp(value: float | int | None, signed: bool = False) -> str:
     return f"{sign}Rp {ax:,.0f}"
 
 
-def split_message(text: str, max_chars: int = 3500) -> list[str]:
-    chunks: list[str] = []
-    current = ""
-    for line in text.splitlines():
-        candidate = f"{current}\n{line}" if current else line
-        if len(candidate) > max_chars and current:
-            chunks.append(current)
-            current = line
-        else:
-            current = candidate
-    if current:
-        chunks.append(current)
-    return chunks
-
-
 def send_telegram(text: str, chat_id: str | None = None) -> None:
-    if not TELEGRAM_BOT_TOKEN:
-        raise RuntimeError("TELEGRAM_BOT_TOKEN belum tersedia.")
-
     target = str(chat_id or TELEGRAM_CHAT_ID).strip()
-    if not target:
-        raise RuntimeError("TELEGRAM_CHAT_ID belum tersedia.")
-
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-
-    for chunk in split_message(text):
-        r = requests.post(
-            url,
-            json={
-                "chat_id": target,
-                "text": chunk,
-                "disable_web_page_preview": True,
-            },
-            timeout=30,
-        )
-        r.raise_for_status()
+    send_message(TELEGRAM_BOT_TOKEN, target, text)
 
 
 def flow_label(net_lots: float, net_value: float) -> str:
@@ -5153,3 +5121,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

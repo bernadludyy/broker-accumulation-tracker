@@ -177,13 +177,13 @@ def determine_trend(close: float, ema20: float, ema50: float) -> str:
     return "NEUTRAL"
 
 
-def analyze_entry(ticker: str, mode: str = "SWING") -> dict[str, Any]:
+def analyze_entry(ticker: str, mode: str = "SWING", *, history: pd.DataFrame | None = None) -> dict[str, Any]:
     ticker = ticker.strip().upper()
     mode = mode.strip().upper()
     if mode not in {"SWING", "DAYTRADE"}:
         mode = "SWING"
 
-    df = add_indicators(load_stock_history(ticker, 100))
+    df = history if history is not None else add_indicators(load_stock_history(ticker, 100))
     latest = df.iloc[-1]
     close = float(latest["close"])
     ema20 = float(latest["ema20"])
@@ -306,19 +306,21 @@ def analyze_entry(ticker: str, mode: str = "SWING") -> dict[str, Any]:
     }
 
 
-def get_broker_flow(ticker: str, trading_days: int) -> dict[str, Any]:
+def get_broker_flow(ticker: str, trading_days: int, end_date: str | None = None) -> dict[str, Any]:
     ticker = ticker.upper().strip()
+    if trading_days < 1:
+        raise ValueError("trading_days must be positive")
     con = sqlite3.connect(tracker.DB_PATH)
     con.row_factory = sqlite3.Row
     dates = con.execute(
         """
         SELECT DISTINCT trade_date
         FROM broker_daily
-        WHERE ticker = ?
+        WHERE ticker = ? AND (? IS NULL OR trade_date <= ?)
         ORDER BY trade_date DESC
         LIMIT ?
         """,
-        (ticker, int(trading_days)),
+        (ticker, end_date, end_date, int(trading_days)),
     ).fetchall()
 
     if not dates:
@@ -326,6 +328,9 @@ def get_broker_flow(ticker: str, trading_days: int) -> dict[str, Any]:
         return {
             "available": False,
             "days": trading_days,
+            "actual_days": 0,
+            "data_status": "NO DATA",
+            "end_date": None,
             "net_lots": 0,
             "net_value": 0,
             "flow": "NO DATA",
@@ -336,6 +341,7 @@ def get_broker_flow(ticker: str, trading_days: int) -> dict[str, Any]:
         }
 
     selected_dates = [str(row["trade_date"]) for row in dates]
+    requested_end = end_date
     start_date, end_date = min(selected_dates), max(selected_dates)
     rows = con.execute(
         """
@@ -402,9 +408,19 @@ def get_broker_flow(ticker: str, trading_days: int) -> dict[str, Any]:
         if dom["sell_lots"] > 0:
             dominant_avg_sell = dom["sell_value"] / (dom["sell_lots"] * 100)
 
+    data_status = "COMPLETE"
+    if requested_end and end_date != requested_end:
+        data_status = "STALE"
+    elif len(selected_dates) < trading_days:
+        data_status = "INCOMPLETE"
+    if data_status != "COMPLETE":
+        flow = data_status
+
     return {
         "available": True,
         "days": trading_days,
+        "actual_days": len(selected_dates),
+        "data_status": data_status,
         "start_date": start_date,
         "end_date": end_date,
         "net_lots": net_lots,
@@ -454,8 +470,8 @@ def classify_setup_score(score: int) -> str:
 
 def build_entry_score(ticker: str, mode: str = "SWING") -> dict[str, Any]:
     ticker = ticker.upper().strip()
-    data = analyze_entry(ticker, mode)
     df = add_indicators(load_stock_history(ticker, 100))
+    data = analyze_entry(ticker, mode, history=df)
     latest = df.iloc[-1]
     previous = df.iloc[-2] if len(df) >= 2 else latest
 
@@ -466,9 +482,9 @@ def build_entry_score(ticker: str, mode: str = "SWING") -> dict[str, Any]:
     obv = float(latest["obv"])
     obv_ema20 = float(latest["obv_ema20"])
 
-    broker_today = get_broker_flow(ticker, 1)
-    broker_5d = get_broker_flow(ticker, 5)
-    broker_20d = get_broker_flow(ticker, 20)
+    broker_today = get_broker_flow(ticker, 1, end_date=data["date"])
+    broker_5d = get_broker_flow(ticker, 5, end_date=data["date"])
+    broker_20d = get_broker_flow(ticker, 20, end_date=data["date"])
 
     broker_score = (
         _broker_flow_points(broker_today["flow"], 8)
@@ -573,6 +589,12 @@ def build_entry_score(ticker: str, mode: str = "SWING") -> dict[str, Any]:
     filters: list[str] = []
     hard_avoid = False
     wait_required = False
+    for name, flow in (("1D", broker_today), ("5D", broker_5d), ("20D", broker_20d)):
+        if flow.get("data_status") != "COMPLETE":
+            wait_required = True
+            filters.append(f"Broker {name}: {flow.get('data_status', 'NO DATA')} "
+                           f"({flow.get('actual_days', 0)}/{flow['days']} hari, "
+                           f"terakhir {flow.get('end_date') or '-'}).")
 
     if broker_5d["flow"] == "DISTRIBUTION CONFIRMED" and broker_20d["flow"] == "DISTRIBUTION CONFIRMED":
         hard_avoid = True
@@ -600,7 +622,7 @@ def build_entry_score(ticker: str, mode: str = "SWING") -> dict[str, Any]:
         status, filter_status = "🔴 AVOID — BROKER DISTRIBUTION", "BLOCK"
     elif data["trend"] == "BEARISH" and broker_bias == "ACCUMULATION":
         status, filter_status = "🟡 EARLY ACCUMULATION — WAIT REVERSAL", "WAIT"
-    elif data["breakout_status"] == "BREAKOUT CONFIRMED" and score >= 65 and selected_rr >= 1.50:
+    elif data["breakout_status"] == "BREAKOUT CONFIRMED" and score >= 65 and selected_rr >= 1.50 and not wait_required:
         status, filter_status = "🚀 BREAKOUT CONFIRMED", "PASS"
     elif data["entry_state"] in {"PULLBACK ZONE", "DEEP PULLBACK ZONE"} and score >= 65 and selected_rr >= 1.50 and not wait_required:
         status, filter_status = "🟢 ENTRY ZONE — SCALE IN", "PASS"
@@ -680,7 +702,7 @@ def format_scanner_report(ticker: str, mode: str = "SWING") -> str:
         f"> Risk/Reward: {data['rr_score']}/15",
         "",
         "🏦 BROKER FLOW",
-        f"> TODAY: {data['broker_today']['flow']}",
+        f"> 1D (s.d. {data['broker_today'].get('end_date') or '-'}): {data['broker_today']['flow']}",
         f"> 5D: {data['broker_5d']['flow']}",
         f"> 20D: {data['broker_20d']['flow']}",
         f"> Bias: {data['broker_bias']}",
@@ -744,3 +766,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
