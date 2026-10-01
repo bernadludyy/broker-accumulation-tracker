@@ -218,3 +218,33 @@ terintegrasi: pemeriksaan konservatif dapat menahan sinyal saat tanggal acuan
 jatuh pada hari libur. Lima observasi terakhir juga belum diaudit terhadap
 kalender bursa lengkap. Jangan memperlakukan mode DAYTRADE berbasis candle
 harian sebagai konfirmasi harga atau volume real-time.
+
+
+## Gabungan aturan Bot 2
+
+- `FOREIGN ENTRY BOT2`: scan universe stock-summary API pada tanggal aman.
+- `ADRO FOREIGN ENTRY BOT2`: periksa ranking/koreksi satu saham, lalu filter entry.
+- Tambahkan `DAYTRADE` jika ingin parameter entry DAYTRADE existing.
+
+Aturan berdasarkan konfigurasi Bot 2 terakhir dalam pembahasan: Top 50 frequency,
+Top 30 net foreign buy positif, koreksi open→close antara -5% dan -0,3% (inklusif).
+Koreksi dihitung `(close / open - 1) * 100`, bukan dari previous close atau high.
+Ranking dihitung sebelum filter koreksi terhadap universe API pada tanggal sama.
+Tie diurutkan alfabetis sehingga jumlah Top N tetap N.
+
+Semua syarat FOREIGN ENTRY tetap wajib: foreign 5D aktual terkonfirmasi menurut
+aturan bot, skor >=70 secara default, entry PASS, R:R >=1,5, dan data valid.
+Ranking dapat memakai estimasi `(ForeignBuy - ForeignSell) * close` bila summary
+hanya menyediakan shares; ini ditandai di pesan. Estimasi ranking tidak mengganti
+syarat nilai foreign aktual 5D dari stock-history. Harga summary dan history harus
+cocok. Jika tanggal, pagination, frequency atau foreign universe tidak valid,
+ranking ditahan. Universe API tidak diklaim identik dengan ranking Stockbit.
+
+Scan memanggil stock-summary dengan pagination (maksimal 20 halaman), kemudian
+stock-history hanya untuk irisan kandidat Top50/Top30/koreksi (maksimal 30 saham).
+Data broker kandidat tetap membutuhkan histori SQLite existing. Kandidat baru
+bisa belum lolos karena histori broker belum dikumpulkan. Hasil menampilkan
+maksimal 10 saham dengan skor tertinggi; error tidak dianggap sinyal kosong.
+Bot 2 terpisah tidak diubah. Tidak menambah jadwal kiriman maupun auto-order.
+Belum diverifikasi dengan payload API live; validasi ketat bisa menahan hasil
+jika upstream tidak menyediakan field tanggal atau nilai yang diperlukan.
