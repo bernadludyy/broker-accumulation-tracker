@@ -731,8 +731,7 @@ def format_scanner_report(ticker: str, mode: str = "SWING") -> str:
             f"> R:R: {data['rr_breakout']:.2f} | {data['rr_breakout_label']}",
         ]
     )
-    return "
-".join(lines)
+    return "\n".join(lines)
 
 
 def main() -> None:
