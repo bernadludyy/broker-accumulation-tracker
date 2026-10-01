@@ -18,6 +18,7 @@ import requests
 from dotenv import load_dotenv
 
 import tracker
+from bot2_entry import format_bot2_entry
 from foreign_entry import format_foreign_entry, format_foreign_entry_scan
 from bot_io import split_message, send_message
 from entry_engine import (
@@ -4242,6 +4243,9 @@ def format_status(ticker: str) -> str:
 HELP_TEXT = """🤖 BROKER QUERY BOT — COMMAND LIST
 
 🌍 FOREIGN + ENTRY
+FOREIGN ENTRY BOT2
+ADRO FOREIGN ENTRY BOT2
+→ Gabungkan Top50 frequency, Top30 foreign dan koreksi open→close -0,3% s.d. -5% dengan seluruh filter FOREIGN ENTRY.
 ADRO FOREIGN ENTRY
 ADRO FOREIGN ENTRY DAYTRADE
 FOREIGN ENTRY
@@ -4727,6 +4731,8 @@ def command_result(text: str, chat_id: str) -> str:
     # Combined foreign + entry checks take precedence over FOREIGN ticker syntax.
     if first_lower == "foreign" and len(parts) >= 2 and parts[1].upper() == "ENTRY":
         mode = "DAYTRADE" if "DAYTRADE" in [p.upper() for p in parts[2:]] else "SWING"
+        if "BOT2" in [p.upper() for p in parts[2:]]:
+            return format_bot2_entry(mode=mode)
         return format_foreign_entry_scan(load_watchlist(), mode)
 
     # Foreign flow (fresh IDX endpoint)
@@ -4911,6 +4917,8 @@ def command_result(text: str, chat_id: str) -> str:
 
     if "FOREIGN" in tokens and "ENTRY" in tokens:
         mode = "DAYTRADE" if "DAYTRADE" in tokens else "SWING"
+        if "BOT2" in tokens:
+            return format_bot2_entry(ticker, mode)
         return format_foreign_entry(ticker, mode)
 
     if "FOREIGN" in tokens:
@@ -5140,5 +5148,6 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 
 
