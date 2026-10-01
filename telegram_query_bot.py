@@ -18,7 +18,13 @@ import requests
 from dotenv import load_dotenv
 
 import tracker
-from entry_engine import format_scanner_report
+from entry_engine import (
+    add_indicators,
+    calculate_levels,
+    determine_trend,
+    format_scanner_report,
+    load_stock_history,
+)
 
 load_dotenv()
 
@@ -2480,6 +2486,919 @@ def format_smart_money_ticker(
 
     return "\n".join(lines)
 
+
+def _next_scalp_session_date() -> str:
+    target = (
+        datetime.now(TIMEZONE).date()
+        + timedelta(days=1)
+    )
+
+    while target.weekday() >= 5:
+        target += timedelta(days=1)
+
+    return target.isoformat()
+
+
+def _series_number(
+    row: Any,
+    *keys: str,
+) -> float:
+    for key in keys:
+        try:
+            value = row.get(key)
+        except Exception:
+            value = None
+
+        if value is None:
+            continue
+
+        try:
+            if str(value).strip().lower() in {
+                "",
+                "nan",
+                "none",
+            }:
+                continue
+
+            return float(
+                str(value)
+                .replace(",", "")
+                .strip()
+            )
+
+        except (TypeError, ValueError):
+            continue
+
+    return 0.0
+
+
+def _foreign_5d_from_history(
+    df: Any,
+) -> dict[str, Any]:
+    rows = df.tail(5)
+
+    buy_value = 0.0
+    sell_value = 0.0
+    net_value = 0.0
+    positive_days = 0
+    exact_available = False
+
+    for _, row in rows.iterrows():
+        day_buy = _series_number(
+            row,
+            "foreignBuyValue",
+            "ForeignBuyValue",
+        )
+        day_sell = _series_number(
+            row,
+            "foreignSellValue",
+            "ForeignSellValue",
+        )
+        day_net = _series_number(
+            row,
+            "netForeignValue",
+            "NetForeignValue",
+        )
+
+        row_has_exact = any(
+            key in row.index
+            for key in (
+                "foreignBuyValue",
+                "ForeignBuyValue",
+                "foreignSellValue",
+                "ForeignSellValue",
+                "netForeignValue",
+                "NetForeignValue",
+            )
+        )
+
+        if row_has_exact:
+            exact_available = True
+
+        if row_has_exact and day_net == 0 and (
+            day_buy != 0
+            or day_sell != 0
+        ):
+            day_net = (
+                day_buy - day_sell
+            )
+
+        if not row_has_exact:
+            close = _series_number(
+                row,
+                "close",
+                "Close",
+            )
+            buy_shares = _series_number(
+                row,
+                "foreignBuyShares",
+                "ForeignBuyShares",
+                "foreignBuy",
+                "ForeignBuy",
+            )
+            sell_shares = _series_number(
+                row,
+                "foreignSellShares",
+                "ForeignSellShares",
+                "foreignSell",
+                "ForeignSell",
+            )
+            day_buy = buy_shares * close
+            day_sell = sell_shares * close
+            day_net = (
+                day_buy - day_sell
+            )
+
+        buy_value += day_buy
+        sell_value += day_sell
+        net_value += day_net
+
+        if day_net > 0:
+            positive_days += 1
+
+    total_flow = (
+        abs(buy_value)
+        + abs(sell_value)
+    )
+
+    ratio = (
+        net_value / total_flow
+        if total_flow > 0
+        else 0.0
+    )
+
+    if net_value > 0:
+        if (
+            positive_days >= 4
+            and ratio >= 0.08
+        ):
+            score = 15
+        elif (
+            positive_days >= 3
+            and ratio >= 0.04
+        ):
+            score = 12
+        elif positive_days >= 3:
+            score = 10
+        else:
+            score = 7
+    elif positive_days >= 3:
+        score = 4
+    else:
+        score = 0
+
+    return {
+        "buy_value": buy_value,
+        "sell_value": sell_value,
+        "net_value": net_value,
+        "positive_days": positive_days,
+        "score": score,
+    }
+
+
+def _scalp_setup_label(
+    score: int,
+) -> str:
+    if score >= 80:
+        return "🟢 A SETUP"
+    if score >= 70:
+        return "🟢 B+ SETUP"
+    if score >= 60:
+        return "🟡 WATCHLIST"
+    return "⚪ LOW PRIORITY"
+
+
+def build_scalp_tomorrow_setup(
+    ticker: str,
+) -> dict[str, Any]:
+    ticker = normalize_ticker(ticker)
+
+    df = add_indicators(
+        load_stock_history(
+            ticker,
+            100,
+        )
+    )
+
+    latest = df.iloc[-1]
+    previous = (
+        df.iloc[-2]
+        if len(df) >= 2
+        else latest
+    )
+
+    close = float(latest["close"])
+    high = float(latest["high"])
+    low = float(latest["low"])
+    atr = max(
+        float(latest["atr14"]),
+        1.0,
+    )
+    ema20 = float(latest["ema20"])
+    ema50 = float(latest["ema50"])
+    rsi = float(latest["rsi14"])
+    macd_hist = float(
+        latest["macd_hist"]
+    )
+    prev_macd_hist = float(
+        previous["macd_hist"]
+    )
+    volume_ratio = float(
+        latest["volume_ratio"]
+    )
+    avg_volume20 = float(
+        latest["avg_volume20"]
+    )
+    latest_value = _series_number(
+        latest,
+        "value",
+        "Value",
+    )
+
+    trend = determine_trend(
+        close,
+        ema20,
+        ema50,
+    )
+    levels = calculate_levels(df)
+
+    support = float(
+        levels["support1"]
+    )
+    deeper_support = float(
+        levels["support2"]
+    )
+    breakout_level = float(
+        levels["breakout_level"]
+    )
+
+    resistance = (
+        float(levels["resistance1"])
+        if levels.get("resistance1")
+        is not None
+        else breakout_level
+    )
+
+    smart = _smart_money_snapshot(
+        ticker,
+        "5D",
+    )
+
+    smart_raw_score = int(
+        smart["score"]
+        if smart
+        else 0
+    )
+    broker_smart_score = int(
+        round(
+            min(
+                25,
+                smart_raw_score
+                * 0.25,
+            )
+        )
+    )
+
+    foreign = _foreign_5d_from_history(
+        df
+    )
+    foreign_score = int(
+        foreign["score"]
+    )
+
+    if volume_ratio >= 1.50:
+        volume_score = 10
+    elif volume_ratio >= 1.20:
+        volume_score = 8
+    elif volume_ratio >= 1.00:
+        volume_score = 6
+    elif volume_ratio >= 0.80:
+        volume_score = 4
+    else:
+        volume_score = 1
+
+    if latest_value >= 20_000_000_000:
+        liquidity_score = 10
+    elif latest_value >= 10_000_000_000:
+        liquidity_score = 8
+    elif latest_value >= 5_000_000_000:
+        liquidity_score = 6
+    elif latest_value >= 2_000_000_000:
+        liquidity_score = 4
+    elif latest_value > 0:
+        liquidity_score = 2
+    else:
+        liquidity_score = 1
+
+    volume_liquidity_score = (
+        volume_score
+        + liquidity_score
+    )
+
+    if close > ema20 > ema50:
+        trend_score = 8
+    elif (
+        close > ema20
+        and close > ema50
+    ):
+        trend_score = 7
+    elif close > ema20:
+        trend_score = 5
+    elif close >= ema20 - atr * 0.5:
+        trend_score = 3
+    else:
+        trend_score = 1
+
+    if (
+        45 <= rsi <= 68
+        and macd_hist > 0
+        and macd_hist >= prev_macd_hist
+    ):
+        momentum_score = 7
+    elif (
+        40 <= rsi <= 72
+        and macd_hist >= prev_macd_hist
+    ):
+        momentum_score = 5
+    elif 35 <= rsi <= 75:
+        momentum_score = 3
+    else:
+        momentum_score = 1
+
+    trend_momentum_score = min(
+        15,
+        trend_score
+        + momentum_score,
+    )
+
+    breakout_distance_pct = (
+        (breakout_level - close)
+        / close
+        * 100
+        if close > 0
+        else 999.0
+    )
+    support_distance_pct = (
+        (close - support)
+        / close
+        * 100
+        if close > 0
+        else 999.0
+    )
+
+    if -2.0 <= breakout_distance_pct <= 3.0:
+        breakout_position_score = 8
+    elif -4.0 <= breakout_distance_pct <= 6.0:
+        breakout_position_score = 6
+    elif breakout_distance_pct <= 10.0:
+        breakout_position_score = 4
+    else:
+        breakout_position_score = 2
+
+    if 0 <= support_distance_pct <= 4.0:
+        support_position_score = 7
+    elif 0 <= support_distance_pct <= 7.0:
+        support_position_score = 5
+    elif 0 <= support_distance_pct <= 12.0:
+        support_position_score = 3
+    else:
+        support_position_score = 1
+
+    sr_score = min(
+        15,
+        breakout_position_score
+        + support_position_score,
+    )
+
+    breakout_entry = (
+        breakout_level
+        + max(
+            1.0,
+            atr * 0.05,
+        )
+    )
+
+    pullback_low = max(
+        1.0,
+        support - atr * 0.10,
+    )
+    pullback_high = min(
+        close,
+        support + atr * 0.20,
+    )
+
+    if pullback_high < pullback_low:
+        pullback_high = pullback_low
+
+    near_breakout = (
+        breakout_distance_pct <= 3.5
+        and breakout_distance_pct >= -2.5
+    )
+
+    if (
+        near_breakout
+        and trend != "BEARISH"
+    ):
+        setup_type = "BREAKOUT"
+        entry_low = breakout_entry
+        entry_high = breakout_entry
+        stop_loss = max(
+            1.0,
+            breakout_level
+            - atr * 0.55,
+        )
+    else:
+        setup_type = "PULLBACK"
+        entry_low = pullback_low
+        entry_high = pullback_high
+        stop_loss = max(
+            1.0,
+            support
+            - atr * 0.45,
+        )
+
+    entry_mid = (
+        entry_low + entry_high
+    ) / 2
+
+    risk = max(
+        entry_mid - stop_loss,
+        atr * 0.25,
+    )
+
+    target1 = max(
+        entry_mid + risk * 1.50,
+        entry_mid + atr * 0.65,
+    )
+    target2 = max(
+        entry_mid + risk * 2.20,
+        entry_mid + atr * 1.10,
+    )
+
+    if (
+        resistance > entry_mid
+        and resistance < target1
+    ):
+        target1 = resistance
+
+    rr = (
+        (target1 - entry_mid)
+        / (entry_mid - stop_loss)
+        if entry_mid > stop_loss
+        else 0.0
+    )
+
+    if rr >= 2.0:
+        rr_score = 10
+    elif rr >= 1.50:
+        rr_score = 8
+    elif rr >= 1.30:
+        rr_score = 6
+    elif rr >= 1.10:
+        rr_score = 3
+    else:
+        rr_score = 0
+
+    score = int(
+        max(
+            0,
+            min(
+                100,
+                broker_smart_score
+                + foreign_score
+                + volume_liquidity_score
+                + trend_momentum_score
+                + sr_score
+                + rr_score,
+            ),
+        )
+    )
+
+    latest_date = str(
+        latest["date"].date()
+    )
+
+    foreign_net = float(
+        foreign["net_value"]
+    )
+    foreign_flow = (
+        "NET BUY"
+        if foreign_net > 0
+        else "NET SELL"
+        if foreign_net < 0
+        else "NEUTRAL"
+    )
+
+    status = _scalp_setup_label(
+        score
+    )
+
+    return {
+        "ticker": ticker,
+        "target_date":
+            _next_scalp_session_date(),
+        "data_date": latest_date,
+        "score": score,
+        "status": status,
+        "setup_type": setup_type,
+        "close": close,
+        "high": high,
+        "low": low,
+        "support": support,
+        "deeper_support":
+            deeper_support,
+        "resistance": resistance,
+        "breakout_level":
+            breakout_level,
+        "breakout_entry":
+            breakout_entry,
+        "pullback_low":
+            pullback_low,
+        "pullback_high":
+            pullback_high,
+        "entry_low": entry_low,
+        "entry_high": entry_high,
+        "stop_loss": stop_loss,
+        "target1": target1,
+        "target2": target2,
+        "rr": rr,
+        "trend": trend,
+        "rsi": rsi,
+        "volume_ratio":
+            volume_ratio,
+        "avg_volume20":
+            avg_volume20,
+        "latest_value":
+            latest_value,
+        "smart_score":
+            smart_raw_score,
+        "smart_label": (
+            smart["label"]
+            if smart
+            else "-"
+        ),
+        "foreign_net":
+            foreign_net,
+        "foreign_flow":
+            foreign_flow,
+        "foreign_positive_days":
+            int(
+                foreign[
+                    "positive_days"
+                ]
+            ),
+        "broker_smart_score":
+            broker_smart_score,
+        "foreign_score":
+            foreign_score,
+        "volume_liquidity_score":
+            volume_liquidity_score,
+        "trend_momentum_score":
+            trend_momentum_score,
+        "sr_score": sr_score,
+        "rr_score": rr_score,
+    }
+
+
+def _format_entry_range(
+    low_value: float,
+    high_value: float,
+) -> str:
+    if abs(
+        high_value - low_value
+    ) < 0.5:
+        return (
+            f"> {format_price(low_value)}"
+        )
+
+    return (
+        f"{format_price(low_value)}"
+        f"–{format_price(high_value)}"
+    )
+
+
+def format_scalp_tomorrow_ticker(
+    ticker: str,
+) -> str:
+    try:
+        row = build_scalp_tomorrow_setup(
+            ticker
+        )
+    except Exception as exc:
+        return (
+            f"❌ SCALP SETUP {ticker.upper()} "
+            f"gagal: {type(exc).__name__}: "
+            f"{exc}"
+        )
+
+    lines = [
+        (
+            f"⚡ SCALP SETUP — "
+            f"{row['ticker']}"
+        ),
+        (
+            f"Target: "
+            f"{row['target_date']}"
+        ),
+        (
+            f"Data: "
+            f"{row['data_date']}"
+        ),
+        (
+            f"Score: "
+            f"{row['score']}/100 "
+            f"| {row['status']}"
+        ),
+        (
+            f"Primary Setup: "
+            f"{row['setup_type']}"
+        ),
+        "",
+        (
+            f"Previous Close: "
+            f"{format_price(row['close'])}"
+        ),
+        (
+            f"Support: "
+            f"{format_price(row['support'])}"
+        ),
+        (
+            f"Resistance: "
+            f"{format_price(row['resistance'])}"
+        ),
+        "",
+        "ENTRY PLAN",
+        (
+            f"> Primary Entry: "
+            f"{_format_entry_range(
+                row['entry_low'],
+                row['entry_high'],
+            )}"
+        ),
+        (
+            f"> Breakout Trigger: > "
+            f"{format_price(
+                row['breakout_entry']
+            )}"
+        ),
+        (
+            f"> Pullback Zone: "
+            f"{_format_entry_range(
+                row['pullback_low'],
+                row['pullback_high'],
+            )}"
+        ),
+        (
+            f"> Stop Loss: < "
+            f"{format_price(
+                row['stop_loss']
+            )}"
+        ),
+        (
+            f"> TP1: "
+            f"{format_price(
+                row['target1']
+            )}"
+        ),
+        (
+            f"> TP2: "
+            f"{format_price(
+                row['target2']
+            )}"
+        ),
+        (
+            f"> R:R TP1: "
+            f"{row['rr']:.2f}"
+        ),
+        "",
+        "FLOW & MOMENTUM",
+        (
+            f"> Smart Money: "
+            f"{row['smart_score']}/100 "
+            f"| {row['smart_label']}"
+        ),
+        (
+            f"> Foreign 5D: "
+            f"{row['foreign_flow']} "
+            f"{format_rp(
+                row['foreign_net'],
+                signed=True,
+            )} "
+            f"| +Days "
+            f"{row['foreign_positive_days']}/5"
+        ),
+        (
+            f"> Trend: "
+            f"{row['trend']} "
+            f"| RSI {row['rsi']:.1f}"
+        ),
+        (
+            f"> Volume: "
+            f"{row['volume_ratio']:.2f}x "
+            f"avg20"
+        ),
+        "",
+        "SCORE BREAKDOWN",
+        (
+            f"> Broker/Smart Money: "
+            f"{row['broker_smart_score']}/25"
+        ),
+        (
+            f"> Foreign Flow: "
+            f"{row['foreign_score']}/15"
+        ),
+        (
+            f"> Volume/Liquidity: "
+            f"{row['volume_liquidity_score']}/20"
+        ),
+        (
+            f"> Trend/Momentum: "
+            f"{row['trend_momentum_score']}/15"
+        ),
+        (
+            f"> Support/Resistance: "
+            f"{row['sr_score']}/15"
+        ),
+        (
+            f"> Risk/Reward: "
+            f"{row['rr_score']}/10"
+        ),
+        "",
+        "OPENING FILTER",
+        "> Gap up maksimal +3% dari previous close",
+        "> Tunggu 5M hold di atas VWAP",
+        "> Breakout harus disertai volume expansion",
+        (
+            f"> Cancel jika break "
+            f"{format_price(
+                row['stop_loss']
+            )}"
+        ),
+    ]
+
+    return "\n".join(lines)
+
+
+def format_scalp_tomorrow_scan(
+    limit: int = 7,
+    min_score: int = 60,
+) -> str:
+    tickers = load_watchlist()
+
+    if not tickers:
+        return "📋 Watchlist aktif kosong."
+
+    results: list[dict[str, Any]] = []
+    errors: list[str] = []
+
+    for ticker in tickers:
+        try:
+            row = (
+                build_scalp_tomorrow_setup(
+                    ticker
+                )
+            )
+
+            if (
+                int(row["score"])
+                >= int(min_score)
+            ):
+                results.append(row)
+
+        except Exception:
+            errors.append(ticker)
+
+    results.sort(
+        key=lambda row: (
+            int(row["score"]),
+            float(
+                row["foreign_net"]
+            ),
+            float(
+                row["volume_ratio"]
+            ),
+        ),
+        reverse=True,
+    )
+
+    shown = results[
+        :max(
+            1,
+            int(limit),
+        )
+    ]
+
+    target_date = (
+        shown[0]["target_date"]
+        if shown
+        else _next_scalp_session_date()
+    )
+
+    data_dates = sorted(
+        {
+            str(row["data_date"])
+            for row in results
+        }
+    )
+
+    data_line = (
+        f"Data Through: "
+        f"{data_dates[-1]}"
+        if data_dates
+        else "Data Through: -"
+    )
+
+    lines = [
+        "⚡ SCALP TOMORROW — WATCHLIST",
+        f"Target: {target_date}",
+        data_line,
+        (
+            f"Scope: Active Watchlist "
+            f"({len(tickers)} ticker)"
+        ),
+        (
+            f"Qualified: "
+            f"{len(results)} "
+            f"| Min Score: "
+            f"{min_score}"
+        ),
+        "",
+    ]
+
+    if not shown:
+        lines.append(
+            "Tidak ada kandidat "
+            "dengan score minimum."
+        )
+
+        return "\n".join(lines)
+
+    for index, row in enumerate(
+        shown,
+        start=1,
+    ):
+        lines.extend(
+            [
+                (
+                    f"{index}. "
+                    f"{row['ticker']} "
+                    f"| {row['score']}/100 "
+                    f"| {row['status']}"
+                ),
+                (
+                    f"> Setup: "
+                    f"{row['setup_type']}"
+                ),
+                (
+                    f"> Close: "
+                    f"{format_price(
+                        row['close']
+                    )}"
+                ),
+                (
+                    f"> Entry: "
+                    f"{_format_entry_range(
+                        row['entry_low'],
+                        row['entry_high'],
+                    )}"
+                ),
+                (
+                    f"> SL: < "
+                    f"{format_price(
+                        row['stop_loss']
+                    )}"
+                ),
+                (
+                    f"> TP1 / TP2: "
+                    f"{format_price(
+                        row['target1']
+                    )} / "
+                    f"{format_price(
+                        row['target2']
+                    )}"
+                ),
+                (
+                    f"> Smart Money: "
+                    f"{row['smart_score']}/100"
+                ),
+                (
+                    f"> Foreign 5D: "
+                    f"{row['foreign_flow']} "
+                    f"{format_rp(
+                        row['foreign_net'],
+                        signed=True,
+                    )}"
+                ),
+                (
+                    f"> Volume: "
+                    f"{row['volume_ratio']:.2f}x"
+                ),
+                "",
+            ]
+        )
+
+    return "\n".join(lines)
+
 def _broker_row_by_code(
     broker_rows: list[dict[str, Any]],
     broker_code: str,
@@ -3823,6 +4742,10 @@ def command_result(text: str, chat_id: str) -> str:
         if first_lower == "/ticker":
             return format_full_report(ticker)
 
+    # Next-session scalping setup
+    if first_lower == "scalp":
+        return format_scalp_tomorrow_scan()
+
     # Foreign flow (fresh IDX endpoint)
     if first_lower == "foreign":
         if len(parts) >= 2:
@@ -3997,6 +4920,11 @@ def command_result(text: str, chat_id: str) -> str:
     # BKSL CC NI 10D
     # BKSL CC NI 20D
     # BKSL CC NI YTD
+
+    if "SCALP" in tokens:
+        return format_scalp_tomorrow_ticker(
+            ticker
+        )
 
     if "FOREIGN" in tokens:
         period = next(
