@@ -2233,6 +2233,7 @@ def collect_missing_dates(
         requested_dates = 0
         dates_ok = 0
         dates_skipped = 0
+        invalid_snapshots = 0
         errors = 0
         saved_rows = 0
 
@@ -2292,6 +2293,17 @@ def collect_missing_dates(
 
                         dates_skipped += 1
 
+                except BrokerSnapshotValidationError as exc:
+
+                    # A malformed upstream day must not abort the entire
+                    # incremental refresh. Preserve existing data and leave
+                    # this date incomplete for later review/retry.
+                    dates_skipped += 1
+                    invalid_snapshots += 1
+                    print(
+                        f"[BROKER-SNAPSHOT-SKIP] {ticker} {ds}: {exc}"
+                    )
+
                 except requests.HTTPError:
 
                     errors += 1
@@ -2329,6 +2341,7 @@ def collect_missing_dates(
             "requested_dates": requested_dates,
             "dates_ok": dates_ok,
             "dates_skipped": dates_skipped,
+            "invalid_snapshots": invalid_snapshots,
             "errors": errors,
             "saved_rows": saved_rows,
             "status": status
