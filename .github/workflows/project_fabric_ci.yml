@@ -20,11 +20,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install runtime dependency
-        run: pip install "requests>=2.31,<3"
-      - name: Compile Project Fabric
-        run: python -m compileall -q project_fabric
+          cache: pip
+          cache-dependency-path: requirements_github.txt
+      - name: Install repository dependencies
+        run: pip install -r requirements_github.txt
+      - name: Compile repository
+        run: python -m compileall -q project_fabric tracker.py entry_engine.py telegram_query_bot.py daily_runner.py bot_io.py
       - name: Framework self-check
         run: python -m project_fabric.selfcheck
-      - name: Framework unit tests
-        run: python -m unittest discover -s tests -p "test_project_fabric.py" -v
+      - name: Unit and integration tests
+        run: python -m unittest discover -s tests -v
