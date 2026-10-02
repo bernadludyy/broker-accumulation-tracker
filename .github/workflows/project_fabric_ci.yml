@@ -1,0 +1,30 @@
+name: Project Fabric CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: project-fabric-ci
+  cancel-in-progress: true
+
+jobs:
+  fabric:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install runtime dependency
+        run: pip install "requests>=2.31,<3"
+      - name: Compile Project Fabric
+        run: python -m compileall -q project_fabric
+      - name: Framework self-check
+        run: python -m project_fabric.selfcheck
+      - name: Framework unit tests
+        run: python -m unittest discover -s tests -p "test_project_fabric.py" -v
