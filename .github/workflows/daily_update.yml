@@ -45,8 +45,36 @@ jobs:
       - name: Project Fabric preflight
         run: python -m project_fabric.selfcheck
 
+      - name: Restore Project Fabric cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .runtime/project_fabric/cache
+          key: fabric-cache-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            fabric-cache-${{ github.ref_name }}-
+
       - name: Run existing daily runner
         run: python daily_runner.py
+
+      - name: Project Fabric API usage report
+        if: always()
+        run: python -m project_fabric.report --github-summary
+
+      - name: Save Project Fabric cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .runtime/project_fabric/cache
+          key: fabric-cache-${{ github.ref_name }}-${{ github.run_id }}
+
+      - name: Upload Project Fabric usage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: project-fabric-usage-${{ github.run_id }}
+          path: .runtime/project_fabric/api_usage.json
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Flush SQLite WAL
         if: always()
