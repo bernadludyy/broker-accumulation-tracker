@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, time as clock_time
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 from zoneinfo import ZoneInfo
 
 import requests
@@ -147,6 +147,7 @@ class ResilientHttp:
         url: str,
         *,
         retry_methods: Iterable[str] = ("GET", "HEAD"),
+        on_attempt: Callable[[int], None] | None = None,
         **kwargs: Any,
     ) -> Any:
         method = method.upper()
@@ -154,6 +155,8 @@ class ResilientHttp:
         kwargs.setdefault("timeout", self.timeout)
 
         for attempt in range(self.retries + 1):
+            if on_attempt is not None:
+                on_attempt(attempt + 1)
             try:
                 response = self.session.request(method, url, **kwargs)
             except (requests.Timeout, requests.ConnectionError):
