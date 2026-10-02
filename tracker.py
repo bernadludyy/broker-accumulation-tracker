@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import json
 import math
 import sqlite3
 import time
@@ -65,6 +66,37 @@ def init_db(db_path: str = DB_PATH) -> None:
     """)
 
     cur.execute("""
+    CREATE TABLE IF NOT EXISTS stock_summary_snapshots (
+        trade_date TEXT PRIMARY KEY,
+        row_count INTEGER NOT NULL CHECK(row_count > 0),
+        source TEXT NOT NULL,
+        fetched_at TEXT NOT NULL
+    );
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS stock_summary_daily (
+        trade_date TEXT NOT NULL,
+        ticker TEXT NOT NULL,
+        open REAL,
+        high REAL,
+        low REAL,
+        close REAL,
+        volume_shares REAL,
+        value REAL,
+        frequency INTEGER,
+        foreign_buy_value REAL,
+        foreign_sell_value REAL,
+        net_foreign_value REAL,
+        payload_json TEXT NOT NULL,
+        fetched_at TEXT NOT NULL,
+        PRIMARY KEY (trade_date, ticker),
+        FOREIGN KEY (trade_date) REFERENCES stock_summary_snapshots(trade_date)
+            ON DELETE CASCADE
+    );
+    """)
+
+    cur.execute("""
     CREATE TABLE IF NOT EXISTS scan_results (
         scan_time TEXT NOT NULL,
         ticker TEXT NOT NULL,
@@ -89,8 +121,185 @@ def init_db(db_path: str = DB_PATH) -> None:
 
     cur.execute("CREATE INDEX IF NOT EXISTS idx_broker_daily_ticker_date ON broker_daily(ticker, trade_date);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_broker_daily_broker_date ON broker_daily(broker, trade_date);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_stock_summary_ticker_date ON stock_summary_daily(ticker, trade_date);")
     con.commit()
     con.close()
+
+
+def _summary_number(row: dict, *keys: str) -> float | None:
+    for key in keys:
+        value = row.get(key)
+        if value in (None, ""):
+            continue
+        try:
+            number = float(str(value).replace(",", ""))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(number):
+            return number
+    return None
+
+
+def _summary_ticker(row: dict) -> str:
+    return str(
+        row.get("ticker")
+        or row.get("StockCode")
+        or row.get("stockCode")
+        or row.get("code")
+        or ""
+    ).strip().upper()
+
+
+def save_stock_summary_snapshot(
+    trade_date: str,
+    rows: list[dict],
+    db_path: str = DB_PATH,
+    source: str = "zapi:finance/idx/stock-summary",
+) -> int:
+    """Atomically replace one complete stock-summary snapshot."""
+    try:
+        parsed_date = date.fromisoformat(str(trade_date))
+    except (TypeError, ValueError):
+        raise ValueError("Tanggal snapshot stock-summary tidak valid.") from None
+    trade_date = parsed_date.isoformat()
+    if not isinstance(rows, list) or not rows:
+        raise ValueError("Snapshot stock-summary kosong; data lama dipertahankan.")
+
+    fetched_at = datetime.now().astimezone().isoformat(timespec="seconds")
+    prepared: list[tuple] = []
+    stock_rows: list[tuple] = []
+    seen: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("Baris stock-summary tidak valid.")
+        ticker = _summary_ticker(row)
+        row_date = row.get("Date") or row.get("date") or row.get("TradingDate")
+        if not ticker or ticker in seen:
+            raise ValueError("Ticker stock-summary kosong/duplikat.")
+        if not row_date or str(row_date)[:10] != trade_date:
+            raise ValueError("Tanggal baris stock-summary tidak sesuai snapshot.")
+        seen.add(ticker)
+
+        payload = dict(row)
+        payload["ticker"] = ticker
+        payload.setdefault("Date", trade_date)
+        try:
+            payload_json = json.dumps(
+                payload,
+                ensure_ascii=False,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        except (TypeError, ValueError):
+            raise ValueError(f"Payload stock-summary {ticker} tidak dapat disimpan.") from None
+
+        opening = _summary_number(payload, "OpenPrice", "Open", "open")
+        high = _summary_number(payload, "HighPrice", "High", "high")
+        low = _summary_number(payload, "LowPrice", "Low", "low")
+        close = _summary_number(payload, "Close", "close")
+        volume = _summary_number(payload, "Volume", "volume", "VolumeShares", "volumeShares")
+        value = _summary_number(payload, "Value", "value", "TransactionValue", "transactionValue")
+        frequency_number = _summary_number(payload, "Frequency", "frequency")
+        frequency = int(frequency_number) if frequency_number is not None and frequency_number.is_integer() else None
+        foreign_buy = _summary_number(payload, "foreignBuyValue", "ForeignBuyValue")
+        foreign_sell = _summary_number(payload, "foreignSellValue", "ForeignSellValue")
+        net_foreign = _summary_number(payload, "netForeignValue", "NetForeignValue")
+
+        prepared.append((
+            trade_date, ticker, opening, high, low, close, volume, value,
+            frequency, foreign_buy, foreign_sell, net_foreign,
+            payload_json, fetched_at,
+        ))
+        stock_rows.append((trade_date, ticker, close, volume, value, frequency, fetched_at))
+
+    init_db(db_path)
+    con = get_connection(db_path)
+    try:
+        with con:
+            con.execute(
+                """
+                INSERT INTO stock_summary_snapshots (trade_date, row_count, source, fetched_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(trade_date) DO UPDATE SET
+                    row_count=excluded.row_count,
+                    source=excluded.source,
+                    fetched_at=excluded.fetched_at
+                """,
+                (trade_date, len(prepared), source, fetched_at),
+            )
+            con.execute("DELETE FROM stock_summary_daily WHERE trade_date = ?", (trade_date,))
+            con.executemany(
+                """
+                INSERT INTO stock_summary_daily (
+                    trade_date, ticker, open, high, low, close,
+                    volume_shares, value, frequency,
+                    foreign_buy_value, foreign_sell_value, net_foreign_value,
+                    payload_json, fetched_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                prepared,
+            )
+            con.executemany(
+                """
+                INSERT INTO stock_daily (
+                    trade_date, ticker, close, volume_shares, value, frequency, fetched_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(trade_date, ticker) DO UPDATE SET
+                    close=COALESCE(excluded.close, stock_daily.close),
+                    volume_shares=COALESCE(excluded.volume_shares, stock_daily.volume_shares),
+                    value=COALESCE(excluded.value, stock_daily.value),
+                    frequency=COALESCE(excluded.frequency, stock_daily.frequency),
+                    fetched_at=excluded.fetched_at
+                """,
+                stock_rows,
+            )
+    finally:
+        con.close()
+    return len(prepared)
+
+
+def load_stock_summary_snapshot(
+    trade_date: str,
+    db_path: str = DB_PATH,
+) -> list[dict] | None:
+    """Return a snapshot only when metadata and stored row count are complete."""
+    init_db(db_path)
+    con = get_connection(db_path)
+    try:
+        meta = con.execute(
+            "SELECT row_count FROM stock_summary_snapshots WHERE trade_date = ?",
+            (trade_date,),
+        ).fetchone()
+        if not meta:
+            return None
+        records = con.execute(
+            """
+            SELECT ticker, payload_json
+            FROM stock_summary_daily
+            WHERE trade_date = ?
+            ORDER BY ticker
+            """,
+            (trade_date,),
+        ).fetchall()
+        if len(records) != int(meta[0]):
+            return None
+        rows: list[dict] = []
+        for ticker, payload_json in records:
+            try:
+                row = json.loads(payload_json)
+            except (TypeError, ValueError):
+                return None
+            if not isinstance(row, dict) or _summary_ticker(row) != ticker:
+                return None
+            row_date = row.get("Date") or row.get("date") or row.get("TradingDate")
+            if not row_date or str(row_date)[:10] != trade_date:
+                return None
+            row["ticker"] = ticker
+            rows.append(row)
+        return rows
+    finally:
+        con.close()
 
 
 def _headers() -> dict:
