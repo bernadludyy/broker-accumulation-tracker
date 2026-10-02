@@ -14,6 +14,7 @@ import pandas as pd
 import requests
 from dotenv import load_dotenv
 from bot_io import get_json, send_message
+from project_fabric.data_gateway import DataGateway, market_policy
 
 load_dotenv()
 
@@ -24,6 +25,8 @@ DB_PATH = os.getenv("DB_PATH", "broker_tracker.db")
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+
+_GATEWAY = DataGateway(service="broker-accumulation-tracker")
 
 
 def get_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
@@ -311,11 +314,33 @@ def _headers() -> dict:
 
 
 def _get(path: str, params: dict, timeout: int = 30) -> dict:
-    return get_json(f"{ZPI_BASE_URL}/{path}", headers=_headers(), params=params, timeout=timeout)
+    path = path.strip().lstrip("/")
+    return _GATEWAY.get_or_load(
+        endpoint=f"pluang:{path}",
+        params=params,
+        loader=lambda: get_json(
+            f"{ZPI_BASE_URL}/{path}",
+            headers=_headers(),
+            params=params,
+            timeout=timeout,
+        ),
+        policy=market_policy("pluang", path),
+    )
 
 
 def _get_idx(path: str, params: dict, timeout: int = 30) -> dict:
-    return get_json(f"{ZPI_IDX_BASE_URL}/{path}", headers=_headers(), params=params, timeout=timeout)
+    path = path.strip().lstrip("/")
+    return _GATEWAY.get_or_load(
+        endpoint=f"idx:{path}",
+        params=params,
+        loader=lambda: get_json(
+            f"{ZPI_IDX_BASE_URL}/{path}",
+            headers=_headers(),
+            params=params,
+            timeout=timeout,
+        ),
+        policy=market_policy("idx", path),
+    )
 
 
 def fetch_stock_summary(
