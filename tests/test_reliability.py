@@ -69,6 +69,36 @@ class SnapshotTests(unittest.TestCase):
             tracker.save_broker_snapshot(snapshot(buyer='BB'), self.db)
         self.assertEqual(self.rows(), before)
 
+    @patch('tracker.time.sleep')
+    @patch('tracker.fetch_broker_summary')
+    def test_collect_daily_skips_bad_snapshot_and_continues(self, fetch, sleep):
+        bad = snapshot(day='2026-09-30', buyer='BAD')
+        bad['sellers'][0]['lots'] = -1
+        good = snapshot(day='2026-10-01', buyer='BB')
+        fetch.side_effect = [bad, good]
+
+        stats = tracker.collect_daily(
+            'TEST',
+            '2026-09-30',
+            '2026-10-01',
+            db_path=self.db,
+            sleep_seconds=0,
+        )
+
+        self.assertEqual(stats['invalid_snapshots'], 1)
+        self.assertEqual(stats['invalid_dates'], ['2026-09-30'])
+        self.assertEqual(stats['dates_ok'], 1)
+        with sqlite3.connect(self.db) as con:
+            sep30 = con.execute(
+                "SELECT broker FROM broker_daily WHERE trade_date='2026-09-30' AND side='BUY'"
+            ).fetchone()
+            oct01 = con.execute(
+                "SELECT broker FROM broker_daily WHERE trade_date='2026-10-01' AND side='BUY'"
+            ).fetchone()
+        self.assertEqual(sep30[0], 'AA')
+        self.assertEqual(oct01[0], 'BB')
+        self.assertEqual(fetch.call_count, 2)
+
     def test_flow_cannot_use_future_dates(self):
         tracker.save_broker_snapshot(snapshot(day='2026-10-01'), self.db)
         with patch.object(tracker, 'DB_PATH', self.db):
