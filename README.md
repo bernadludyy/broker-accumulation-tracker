@@ -240,7 +240,9 @@ syarat nilai foreign aktual 5D dari stock-history. Harga summary dan history har
 cocok. Jika tanggal, pagination, frequency atau foreign universe tidak valid,
 ranking ditahan. Universe API tidak diklaim identik dengan ranking Stockbit.
 
-Scan memanggil stock-summary dengan pagination (maksimal 20 halaman), kemudian
+Scan meminta hingga 5.000 baris stock-summary per request (batas endpoint),
+berhenti setelah total baris yang dilaporkan API tercapai atau halaman pendek.
+Batas pengaman tetap 20 halaman. Setelah itu bot memanggil
 stock-history hanya untuk irisan kandidat Top50/Top30/koreksi (maksimal 30 saham).
 Data broker kandidat tetap membutuhkan histori SQLite existing. Kandidat baru
 bisa belum lolos karena histori broker belum dikumpulkan. Hasil menampilkan

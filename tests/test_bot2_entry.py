@@ -37,9 +37,18 @@ class CombinedTests(unittest.TestCase):
         self.assertEqual(ranked['net'],80*98)
 
     def test_pagination_and_dates(self):
-        with patch.object(b.tracker,'fetch_stock_summary',side_effect=[{'items':[row()]}, {'items':[]}]):
+        with patch.object(b.tracker,'fetch_stock_summary',return_value={'items':[row()], 'total':1}) as fetch:
             self.assertEqual(len(b.load_market('2026-10-01')),1)
-        with patch.object(b.tracker,'fetch_stock_summary',return_value={'items':[row()]}):
+            fetch.assert_called_once_with(date='2026-10-01',length=5000,start=0)
+        with patch.object(b.tracker,'fetch_stock_summary',side_effect=[
+            {'items':[row('TEST')], 'total':2},
+            {'items':[row('NEXT')], 'total':2}
+        ]) as fetch:
+            self.assertEqual(len(b.load_market('2026-10-01')),2)
+            self.assertEqual(fetch.call_args.kwargs['start'],1)
+        with patch.object(b.tracker,'fetch_stock_summary',side_effect=[
+            {'items':[row()], 'total':2}, {'items':[], 'total':2}
+        ]):
             with self.assertRaises(ValueError): b.load_market('2026-10-01')
         with patch.object(b.tracker,'fetch_stock_summary',return_value={'items':[row()]}):
             with self.assertRaises(ValueError): b.load_market('2026-09-30')

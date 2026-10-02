@@ -8,8 +8,9 @@ from foreign_entry import _number, evaluate_foreign_entry, format_result
 
 def load_market(day):
     rows, seen = [], set()
+    page_size = 5000  # Zapi stock-summary maximum; usually the entire market fits in one call.
     for page in range(20):
-        payload = tracker.fetch_stock_summary(date=day, length=1000, start=len(rows))
+        payload = tracker.fetch_stock_summary(date=day, length=page_size, start=len(rows))
         if isinstance(payload, list):
             batch, stamp = payload, None
         elif isinstance(payload, dict):
@@ -19,9 +20,19 @@ def load_market(day):
             raise ValueError('Respons universe tidak valid.')
         if not isinstance(batch, list):
             raise ValueError('Daftar universe tidak valid.')
+        total = payload.get('total') if isinstance(payload, dict) else None
+        if total is not None:
+            try:
+                total = int(total)
+            except (ValueError, TypeError):
+                raise ValueError('Total universe tidak valid.') from None
+            if total < 1 or total < len(rows) + len(batch):
+                raise ValueError('Total universe tidak konsisten.')
         if not batch:
             if not rows:
                 raise ValueError('Universe pasar kosong.')
+            if total is not None and len(rows) < total:
+                raise ValueError('Pagination berhenti sebelum seluruh universe diterima.')
             return rows
         for row in batch:
             if not isinstance(row, dict):
@@ -34,6 +45,11 @@ def load_market(day):
                 raise ValueError('Ticker kosong/duplikat; pagination universe tidak lengkap.')
             seen.add(code)
             rows.append(dict(row, ticker=code))
+        # Prefer the API's total. Without it, a short page ends pagination.
+        if total is not None and len(rows) >= total:
+            return rows
+        if total is None and len(batch) < page_size:
+            return rows
     raise ValueError('Batas pagination tercapai; ranking pasar tidak diterbitkan.')
 
 
