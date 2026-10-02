@@ -419,6 +419,10 @@ def _parse_number(x) -> Optional[float]:
         return None
 
 
+class BrokerSnapshotValidationError(ValueError):
+    """Upstream broker snapshot is malformed and must not overwrite stored data."""
+
+
 def save_broker_snapshot(payload: dict, db_path: str = DB_PATH) -> int:
     """Validate the complete daily snapshot before replacing it atomically.
 
@@ -426,40 +430,44 @@ def save_broker_snapshot(payload: dict, db_path: str = DB_PATH) -> int:
     Multi-day aggregates must never be inserted as a single daily observation.
     """
     if not isinstance(payload, dict):
-        raise ValueError("Broker snapshot harus berupa object.")
+        raise BrokerSnapshotValidationError("Broker snapshot harus berupa object.")
     if payload.get("success") is False or payload.get("ok") is False:
-        raise ValueError("Broker snapshot gagal dari upstream.")
+        raise BrokerSnapshotValidationError("Broker snapshot gagal dari upstream.")
     if not any(payload.get(k) for k in ("buyers", "sellers")):
         return 0
     ticker = str(payload.get("code") or "").strip().upper()
     trade_date = payload.get("endDate") or payload.get("startDate")
     if not ticker or not isinstance(trade_date, str):
-        raise ValueError("Ticker/tanggal broker snapshot tidak lengkap.")
+        raise BrokerSnapshotValidationError("Ticker/tanggal broker snapshot tidak lengkap.")
     trade_date = date.fromisoformat(trade_date).isoformat()
     if payload.get("startDate") and payload["startDate"] != trade_date:
-        raise ValueError("Hanya snapshot satu hari yang boleh disimpan.")
+        raise BrokerSnapshotValidationError("Hanya snapshot satu hari yang boleh disimpan.")
     source = payload.get("source", "pluang")
     fetched_at = datetime.now().isoformat(timespec="seconds")
     rows, seen = [], set()
     for side_key, side in (("buyers", "BUY"), ("sellers", "SELL")):
         items = payload.get(side_key)
         if not isinstance(items, list):
-            raise ValueError(f"Field {side_key} harus berupa list lengkap.")
+            raise BrokerSnapshotValidationError(f"Field {side_key} harus berupa list lengkap.")
         for item in items:
             if not isinstance(item, dict):
-                raise ValueError("Baris broker tidak valid.")
+                raise BrokerSnapshotValidationError("Baris broker tidak valid.")
             broker = str(item.get("broker") or "").strip().upper()
             lots = _parse_number(item.get("lots"))
             value = _parse_number(item.get("value"))
             average = _parse_number(item.get("averagePrice"))
             if not broker or (broker, side) in seen:
-                raise ValueError("Kode broker kosong atau duplikat.")
+                raise BrokerSnapshotValidationError("Kode broker kosong atau duplikat.")
             if any(x is None or not math.isfinite(x) or x < 0 for x in (lots, value)):
-                raise ValueError("Lot/value harus berupa angka finite non-negatif.")
+                raise BrokerSnapshotValidationError(
+                    "Lot/value broker tidak valid "
+                    f"(date={trade_date}, ticker={ticker}, broker={broker}, side={side}, "
+                    f"lots={item.get('lots')!r}, value={item.get('value')!r})."
+                )
             if lots != int(lots):
-                raise ValueError("Lot broker harus bilangan bulat.")
+                raise BrokerSnapshotValidationError("Lot broker harus bilangan bulat.")
             if average is not None and (not math.isfinite(average) or average < 0):
-                raise ValueError("Average price broker tidak valid.")
+                raise BrokerSnapshotValidationError("Average price broker tidak valid.")
             seen.add((broker, side))
             rows.append((trade_date, ticker, broker, side, int(lots), value, average, source, fetched_at))
     con = get_connection(db_path)
@@ -490,7 +498,14 @@ def collect_daily(
     d0 = date.fromisoformat(start_date)
     d1 = date.fromisoformat(end_date)
 
-    stats = {"ticker": ticker.upper(), "saved_rows": 0, "dates_ok": 0, "dates_skipped": 0}
+    stats = {
+        "ticker": ticker.upper(),
+        "saved_rows": 0,
+        "dates_ok": 0,
+        "dates_skipped": 0,
+        "invalid_snapshots": 0,
+        "invalid_dates": [],
+    }
     d = d0
 
     while d <= d1:
@@ -505,6 +520,15 @@ def collect_daily(
                     stats["dates_ok"] += 1
                 else:
                     stats["dates_skipped"] += 1
+            except BrokerSnapshotValidationError as exc:
+                # Reject only the malformed day. Never overwrite that date,
+                # but continue the backfill/refresh for other trading dates.
+                stats["dates_skipped"] += 1
+                stats["invalid_snapshots"] += 1
+                stats["invalid_dates"].append(ds)
+                print(
+                    f"[BROKER-SNAPSHOT-SKIP] {ticker.upper()} {ds}: {exc}"
+                )
             except requests.HTTPError:
                 stats["dates_skipped"] += 1
             time.sleep(sleep_seconds)
