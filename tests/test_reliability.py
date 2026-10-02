@@ -88,6 +88,78 @@ class SnapshotTests(unittest.TestCase):
             self.assertEqual(entry_engine._broker_flow_points(result['flow'], 15), 0)
 
 
+class StockSummarySnapshotTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = str(Path(self.tmp.name) / 'summary.db')
+        tracker.init_db(self.db)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def summary(self, ticker='TEST', close=98):
+        return {
+            'StockCode': ticker,
+            'Date': '2026-10-01T00:00:00',
+            'OpenPrice': 100,
+            'High': 101,
+            'Low': 97,
+            'Close': close,
+            'Volume': 100000,
+            'Value': 9800000,
+            'Frequency': 123,
+            'ForeignBuyValue': 4000000,
+            'ForeignSellValue': 1000000,
+            'NetForeignValue': 3000000,
+            'ExtraField': 'tetap tersimpan',
+        }
+
+    def test_full_payload_round_trip_and_stock_daily_sync(self):
+        rows = [self.summary()]
+        self.assertEqual(tracker.save_stock_summary_snapshot('2026-10-01', rows, self.db), 1)
+        loaded = tracker.load_stock_summary_snapshot('2026-10-01', self.db)
+        self.assertEqual(loaded[0]['ExtraField'], 'tetap tersimpan')
+        self.assertEqual(loaded[0]['ticker'], 'TEST')
+        with sqlite3.connect(self.db) as con:
+            summary = con.execute(
+                'SELECT open, close, frequency, net_foreign_value FROM stock_summary_daily'
+            ).fetchone()
+            stock = con.execute(
+                'SELECT close, volume_shares, value, frequency FROM stock_daily'
+            ).fetchone()
+        self.assertEqual(summary, (100.0, 98.0, 123, 3000000.0))
+        self.assertEqual(stock, (98.0, 100000.0, 9800000.0, 123))
+
+    def test_replace_is_atomic_and_removes_stale_ticker(self):
+        tracker.save_stock_summary_snapshot(
+            '2026-10-01', [self.summary('OLD'), self.summary('KEEP')], self.db
+        )
+        tracker.save_stock_summary_snapshot('2026-10-01', [self.summary('NEW')], self.db)
+        self.assertEqual(
+            [row['ticker'] for row in tracker.load_stock_summary_snapshot('2026-10-01', self.db)],
+            ['NEW'],
+        )
+
+    def test_invalid_refresh_preserves_previous_snapshot(self):
+        tracker.save_stock_summary_snapshot('2026-10-01', [self.summary('OLD')], self.db)
+        bad = self.summary('NEW')
+        bad['Date'] = '2026-09-30'
+        with self.assertRaises(ValueError):
+            tracker.save_stock_summary_snapshot('2026-10-01', [bad], self.db)
+        loaded = tracker.load_stock_summary_snapshot('2026-10-01', self.db)
+        self.assertEqual([row['ticker'] for row in loaded], ['OLD'])
+
+    def test_incomplete_snapshot_is_never_reused(self):
+        tracker.save_stock_summary_snapshot(
+            '2026-10-01', [self.summary('ONE'), self.summary('TWO')], self.db
+        )
+        with sqlite3.connect(self.db) as con:
+            con.execute(
+                "DELETE FROM stock_summary_daily WHERE trade_date='2026-10-01' AND ticker='TWO'"
+            )
+        self.assertIsNone(tracker.load_stock_summary_snapshot('2026-10-01', self.db))
+
+
 class IOTests(unittest.TestCase):
     def response(self, status=200, payload=None):
         r = Mock(status_code=status, headers={}, ok=status < 400)

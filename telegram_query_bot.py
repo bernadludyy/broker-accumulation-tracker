@@ -4245,7 +4245,9 @@ HELP_TEXT = """🤖 BROKER QUERY BOT — COMMAND LIST
 🌍 FOREIGN + ENTRY
 FOREIGN ENTRY BOT2
 ADRO FOREIGN ENTRY BOT2
+FOREIGN ENTRY BOT2 REFRESH
 → Gabungkan Top50 frequency, Top30 foreign dan koreksi open→close -0,3% s.d. -5% dengan seluruh filter FOREIGN ENTRY.
+→ Snapshot harian disimpan di database; REFRESH memaksa ambil ulang dari Zapi.
 ADRO FOREIGN ENTRY
 ADRO FOREIGN ENTRY DAYTRADE
 FOREIGN ENTRY
@@ -4732,6 +4734,8 @@ def command_result(text: str, chat_id: str) -> str:
     if first_lower == "foreign" and len(parts) >= 2 and parts[1].upper() == "ENTRY":
         mode = "DAYTRADE" if "DAYTRADE" in [p.upper() for p in parts[2:]] else "SWING"
         if "BOT2" in [p.upper() for p in parts[2:]]:
+            if "REFRESH" in [p.upper() for p in parts[2:]]:
+                return format_bot2_entry(mode=mode, force_refresh=True)
             return format_bot2_entry(mode=mode)
         return format_foreign_entry_scan(load_watchlist(), mode)
 
@@ -4918,6 +4922,8 @@ def command_result(text: str, chat_id: str) -> str:
     if "FOREIGN" in tokens and "ENTRY" in tokens:
         mode = "DAYTRADE" if "DAYTRADE" in tokens else "SWING"
         if "BOT2" in tokens:
+            if "REFRESH" in tokens:
+                return format_bot2_entry(ticker, mode, force_refresh=True)
             return format_bot2_entry(ticker, mode)
         return format_foreign_entry(ticker, mode)
 

@@ -6,9 +6,22 @@ import tracker
 from foreign_entry import _number, evaluate_foreign_entry, format_result
 
 
-def load_market(day):
+def load_market(day, force_refresh=False, with_source=False):
+    if not force_refresh:
+        cached = tracker.load_stock_summary_snapshot(day)
+        if cached is not None:
+            return (cached, 'DATABASE SNAPSHOT') if with_source else cached
+
     rows, seen = [], set()
     page_size = 5000  # Zapi stock-summary maximum; usually the entire market fits in one call.
+
+    def finish():
+        try:
+            tracker.save_stock_summary_snapshot(day, rows)
+        except Exception as exc:
+            raise ValueError('Universe valid tetapi gagal disimpan ke database.') from exc
+        return (rows, 'ZAPI FRESH + TERSIMPAN') if with_source else rows
+
     for page in range(20):
         payload = tracker.fetch_stock_summary(date=day, length=page_size, start=len(rows))
         if isinstance(payload, list):
@@ -33,7 +46,7 @@ def load_market(day):
                 raise ValueError('Universe pasar kosong.')
             if total is not None and len(rows) < total:
                 raise ValueError('Pagination berhenti sebelum seluruh universe diterima.')
-            return rows
+            return finish()
         for row in batch:
             if not isinstance(row, dict):
                 raise ValueError('Baris universe tidak valid.')
@@ -44,12 +57,14 @@ def load_market(day):
             if not code or code in seen:
                 raise ValueError('Ticker kosong/duplikat; pagination universe tidak lengkap.')
             seen.add(code)
-            rows.append(dict(row, ticker=code))
+            normalized = dict(row, ticker=code)
+            normalized.setdefault('Date', str(date)[:10])
+            rows.append(normalized)
         # Prefer the API's total. Without it, a short page ends pagination.
         if total is not None and len(rows) >= total:
-            return rows
+            return finish()
         if total is None and len(batch) < page_size:
-            return rows
+            return finish()
     raise ValueError('Batas pagination tercapai; ranking pasar tidak diterbitkan.')
 
 
@@ -107,15 +122,21 @@ def rank_text(row):
             else f'Frequency #{row["frequency_rank"]} | Foreign #{row["foreign_rank"]} | OHLC tidak lengkap')
 
 
-def format_bot2_entry(ticker=None, mode='SWING'):
+def format_bot2_entry(ticker=None, mode='SWING', force_refresh=False):
     day = tracker.get_safe_end_date(datetime.now(ZoneInfo('Asia/Jakarta')).date().isoformat())
     try:
-        market = rank_market(load_market(day))
+        market_rows, universe_source = load_market(
+            day,
+            force_refresh=force_refresh,
+            with_source=True,
+        )
+        market = rank_market(market_rows)
     except Exception as exc:
         # Expected validation messages are ours; upstream errors can contain URLs.
         detail = str(exc) if type(exc) is ValueError else 'API universe gagal; coba lagi.'
         return '⏳ FOREIGN ENTRY BOT2 — DATA BELUM VALID\n' + detail
-    header = [f'🌍 FOREIGN ENTRY BOT2 — {day} | {mode}', f'Universe API: {len(market)} saham',
+    header = [f'🌍 FOREIGN ENTRY BOT2 — {day} | {mode}',
+              f'Universe: {len(market)} saham | {universe_source}',
               'Top 50 frequency ∩ Top 30 foreign ∩ koreksi open→close -0,3% s.d. -5%.']
     if any(row['estimated'] for row in market.values()):
         header += ['Ranking foreign mencakup estimasi (net shares × close); konfirmasi foreign 5D tetap wajib nilai aktual.']

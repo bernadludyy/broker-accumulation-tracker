@@ -37,25 +37,52 @@ class CombinedTests(unittest.TestCase):
         self.assertEqual(ranked['net'],80*98)
 
     def test_pagination_and_dates(self):
-        with patch.object(b.tracker,'fetch_stock_summary',return_value={'items':[row()], 'total':1}) as fetch:
+        with patch.object(b.tracker,'load_stock_summary_snapshot',return_value=None), \
+             patch.object(b.tracker,'save_stock_summary_snapshot') as save, \
+             patch.object(b.tracker,'fetch_stock_summary',return_value={'items':[row()], 'total':1}) as fetch:
             self.assertEqual(len(b.load_market('2026-10-01')),1)
             fetch.assert_called_once_with(date='2026-10-01',length=5000,start=0)
-        with patch.object(b.tracker,'fetch_stock_summary',side_effect=[
+            save.assert_called_once()
+        with patch.object(b.tracker,'load_stock_summary_snapshot',return_value=None), \
+             patch.object(b.tracker,'save_stock_summary_snapshot'), \
+             patch.object(b.tracker,'fetch_stock_summary',side_effect=[
             {'items':[row('TEST')], 'total':2},
             {'items':[row('NEXT')], 'total':2}
         ]) as fetch:
             self.assertEqual(len(b.load_market('2026-10-01')),2)
             self.assertEqual(fetch.call_args.kwargs['start'],1)
-        with patch.object(b.tracker,'fetch_stock_summary',side_effect=[
+        with patch.object(b.tracker,'load_stock_summary_snapshot',return_value=None), \
+             patch.object(b.tracker,'save_stock_summary_snapshot'), \
+             patch.object(b.tracker,'fetch_stock_summary',side_effect=[
             {'items':[row()], 'total':2}, {'items':[], 'total':2}
         ]):
             with self.assertRaises(ValueError): b.load_market('2026-10-01')
-        with patch.object(b.tracker,'fetch_stock_summary',return_value={'items':[row()]}):
+        with patch.object(b.tracker,'load_stock_summary_snapshot',return_value=None), \
+             patch.object(b.tracker,'save_stock_summary_snapshot'), \
+             patch.object(b.tracker,'fetch_stock_summary',return_value={'items':[row()]}):
             with self.assertRaises(ValueError): b.load_market('2026-09-30')
+
+    def test_database_snapshot_avoids_zapi_request(self):
+        cached = [row()]
+        with patch.object(b.tracker,'load_stock_summary_snapshot',return_value=cached), \
+             patch.object(b.tracker,'fetch_stock_summary') as fetch:
+            rows, source = b.load_market('2026-10-01', with_source=True)
+        self.assertEqual(rows, cached)
+        self.assertEqual(source, 'DATABASE SNAPSHOT')
+        fetch.assert_not_called()
+
+    def test_refresh_bypasses_cache_and_saves_fresh_response(self):
+        with patch.object(b.tracker,'load_stock_summary_snapshot') as load, \
+             patch.object(b.tracker,'save_stock_summary_snapshot') as save, \
+             patch.object(b.tracker,'fetch_stock_summary',return_value={'items':[row()], 'total':1}):
+            rows, source = b.load_market('2026-10-01', force_refresh=True, with_source=True)
+        load.assert_not_called()
+        save.assert_called_once_with('2026-10-01', rows)
+        self.assertEqual(source, 'ZAPI FRESH + TERSIMPAN')
 
     def test_market_pass_does_not_override_entry_failure(self):
         result={'passed':False,'entry':{'score':90,'close':98},'reasons':['WAIT']}
-        with patch.object(b,'load_market',return_value=[row()]), \
+        with patch.object(b,'load_market',return_value=([row()],'DATABASE SNAPSHOT')), \
              patch.object(b,'evaluate_foreign_entry',return_value=result), \
              patch.object(b.tracker,'get_safe_end_date',return_value='2026-10-01'):
             text=b.format_bot2_entry()
@@ -64,7 +91,7 @@ class CombinedTests(unittest.TestCase):
 
     def test_price_mismatch_blocks_otherwise_passing_entry(self):
         result={'passed':True,'entry':{'score':90,'close':99},'reasons':[]}
-        with patch.object(b,'load_market',return_value=[row()]), \
+        with patch.object(b,'load_market',return_value=([row()],'DATABASE SNAPSHOT')), \
              patch.object(b,'evaluate_foreign_entry',return_value=result):
             text=b.format_bot2_entry()
         self.assertIn('Lolos gabungan: 0',text)
@@ -76,5 +103,11 @@ class CombinedTests(unittest.TestCase):
         with patch.object(bot,'format_bot2_entry',return_value='ok') as mock:
             self.assertEqual(bot.command_result('ADRO FOREIGN ENTRY BOT2','123'),'ok')
             mock.assert_called_once_with('ADRO','SWING')
+        with patch.object(bot,'format_bot2_entry',return_value='ok') as mock:
+            self.assertEqual(bot.command_result('FOREIGN ENTRY BOT2 REFRESH','123'),'ok')
+            mock.assert_called_once_with(mode='SWING', force_refresh=True)
+        with patch.object(bot,'format_bot2_entry',return_value='ok') as mock:
+            self.assertEqual(bot.command_result('ADRO FOREIGN ENTRY BOT2 REFRESH','123'),'ok')
+            mock.assert_called_once_with('ADRO','SWING', force_refresh=True)
 
 if __name__=='__main__': unittest.main()

@@ -224,6 +224,7 @@ harian sebagai konfirmasi harga atau volume real-time.
 
 - `FOREIGN ENTRY BOT2`: scan universe stock-summary API pada tanggal aman.
 - `ADRO FOREIGN ENTRY BOT2`: periksa ranking/koreksi satu saham, lalu filter entry.
+- `FOREIGN ENTRY BOT2 REFRESH`: paksa ambil ulang snapshot tanggal aman dari Zapi.
 - Tambahkan `DAYTRADE` jika ingin parameter entry DAYTRADE existing.
 
 Aturan berdasarkan konfigurasi Bot 2 terakhir dalam pembahasan: Top 50 frequency,
@@ -242,7 +243,15 @@ ranking ditahan. Universe API tidak diklaim identik dengan ranking Stockbit.
 
 Scan meminta hingga 5.000 baris stock-summary per request (batas endpoint),
 berhenti setelah total baris yang dilaporkan API tercapai atau halaman pendek.
-Batas pengaman tetap 20 halaman. Setelah itu bot memanggil
+Batas pengaman tetap 20 halaman. Snapshot lengkap disimpan secara atomik di
+SQLite (`stock_summary_snapshots` dan `stock_summary_daily`) bersama payload asli
+serta kolom harga, volume, value, frequency, dan foreign yang dinormalisasi.
+Tabel `stock_daily` existing juga diperbarui dari respons yang sama. Pemanggilan
+ulang untuk tanggal yang sama membaca snapshot database sehingga tidak memakai
+request stock-summary Zapi tambahan. Gunakan `REFRESH` hanya saat ingin memaksa
+pengambilan ulang; respons baru mengganti snapshot tanggal tersebut hanya setelah
+seluruh baris lolos validasi. Snapshot mulai terkumpul setelah fitur ini aktif dan
+tidak melakukan backfill tanggal lama secara otomatis. Setelah itu bot memanggil
 stock-history hanya untuk irisan kandidat Top50/Top30/koreksi (maksimal 30 saham).
 Data broker kandidat tetap membutuhkan histori SQLite existing. Kandidat baru
 bisa belum lolos karena histori broker belum dikumpulkan. Hasil menampilkan
