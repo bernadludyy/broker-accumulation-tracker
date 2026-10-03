@@ -10,14 +10,15 @@ from project_fabric.postgres_backend import PostgresTTLCache
 
 
 @unittest.skipUnless(
-    os.getenv("PROJECT_FABRIC_DATABASE_URL", "").strip(),
-    "shared PostgreSQL integration requires PROJECT_FABRIC_DATABASE_URL",
+    os.getenv("PROJECT_FABRIC_DATABASE_URL", "").strip()
+    and os.getenv("PROJECT_FABRIC_INTEGRATION_TESTS", "").strip() == "1",
+    "shared PostgreSQL integration requires explicit PROJECT_FABRIC_INTEGRATION_TESTS=1",
 )
 class Phase3SharedCacheTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.url = os.environ["PROJECT_FABRIC_DATABASE_URL"]
-        cls.namespace = os.getenv("PROJECT_FABRIC_CACHE_NAMESPACE", "phase3-test")
+        cls.namespace = f"phase3-test-{os.getenv('GITHUB_RUN_ID', 'local')}"
         cls.admin = PostgresTTLCache(
             cls.url,
             namespace=cls.namespace,
