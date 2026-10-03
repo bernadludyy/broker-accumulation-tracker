@@ -1,0 +1,36 @@
+name: Phase 4 Production Verify
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "phase4_observability_probe.py"
+      - "project_fabric/observability.py"
+      - "project_fabric/postgres_backend.py"
+      - ".github/workflows/phase4_production_verify.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase4-production-verify
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PROJECT_FABRIC_DATABASE_URL: ${{ secrets.PROJECT_FABRIC_DATABASE_URL }}
+      PROJECT_FABRIC_DB_REQUIRED: "true"
+      PHASE4_PROBE_SERVICE: broker-accumulation-tracker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements_github.txt
+      - name: Require Neon backend
+        run: python -m project_fabric.db_admin status --require
+      - name: Verify Phase 4 observability
+        run: python phase4_observability_probe.py
