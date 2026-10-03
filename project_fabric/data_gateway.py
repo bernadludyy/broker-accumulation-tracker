@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .core import JsonTTLCache, ResilientHttp, emit, new_run_id, now_jakarta
+from .postgres_backend import PostgresTTLCache, configured_database_url
 
 
 @dataclass(frozen=True)
@@ -153,6 +154,70 @@ def _shared_meter(service: str, path: Path, run_id: str) -> ApiUsageMeter:
         return meter
 
 
+class HybridTTLCache:
+    """Remote shared cache with a local mirror/fallback."""
+
+    def __init__(
+        self,
+        local: JsonTTLCache,
+        remote: PostgresTTLCache | None,
+        *,
+        required: bool,
+        service: str,
+    ):
+        self.local = local
+        self.remote = remote
+        self.required = required
+        self.service = service
+
+    def _remote_failure(self, operation: str, exc: Exception) -> None:
+        emit(
+            "shared_cache.error",
+            service=self.service,
+            operation=operation,
+            error_type=type(exc).__name__,
+            required=self.required,
+        )
+        if self.required:
+            raise exc
+
+    def get(self, key: str, ttl_seconds: float) -> Any | None:
+        if self.remote is not None:
+            try:
+                value = self.remote.get(key, ttl_seconds)
+                if value is not None:
+                    self.local.set(key, value)
+                    return value
+            except Exception as exc:
+                self._remote_failure("get", exc)
+        return self.local.get(key, ttl_seconds)
+
+    def set(self, key: str, value: Any) -> None:
+        self.local.set(key, value)
+        if self.remote is not None:
+            try:
+                self.remote.set(key, value)
+            except Exception as exc:
+                self._remote_failure("set", exc)
+
+    def acquire_lease(self, key: str, owner: str, lease_seconds: int = 20) -> bool:
+        if self.remote is None:
+            return True
+        try:
+            return self.remote.acquire_lease(key, owner, lease_seconds)
+        except Exception as exc:
+            self._remote_failure("acquire_lease", exc)
+            return True
+
+    def release_lease(self, key: str, owner: str) -> None:
+        if self.remote is None:
+            return
+        try:
+            self.remote.release_lease(key, owner)
+        except Exception as exc:
+            self._remote_failure("release_lease", exc)
+
+
 class DataGateway:
     """One ingress for cache policy, freshness, bounded retries and API metering."""
 
@@ -167,10 +232,44 @@ class DataGateway:
         root = Path(runtime_dir or os.getenv("FABRIC_RUNTIME_DIR", ".runtime/project_fabric"))
         self.service = service
         self.runtime_dir = root
-        self.cache = JsonTTLCache(root / "cache")
         self.run_id = run_id or new_run_id(service)
         self.meter = _shared_meter(service, root / "api_usage.json", self.run_id)
         self.http = http or ResilientHttp(retries=2)
+
+        required = os.getenv("PROJECT_FABRIC_DB_REQUIRED", "").strip().lower() in {
+            "1", "true", "yes", "on"
+        }
+        namespace = (
+            os.getenv("PROJECT_FABRIC_CACHE_NAMESPACE", "shared-v1").strip()
+            or "shared-v1"
+        )
+        remote: PostgresTTLCache | None = None
+        database_url = configured_database_url()
+        if database_url:
+            try:
+                remote = PostgresTTLCache(
+                    database_url,
+                    namespace=namespace,
+                    service=service,
+                    auto_migrate=True,
+                )
+            except Exception as exc:
+                emit(
+                    "shared_cache.init_failed",
+                    service=service,
+                    error_type=type(exc).__name__,
+                    required=required,
+                )
+                if required:
+                    raise
+
+        self.cache = HybridTTLCache(
+            JsonTTLCache(root / "cache"),
+            remote,
+            required=required,
+            service=service,
+        )
+        self.cache_backend = "postgres+local" if remote is not None else "local"
 
     @staticmethod
     def _cache_key(endpoint: str, params: dict[str, Any] | None) -> str:
@@ -196,34 +295,56 @@ class DataGateway:
                 self.meter.record(endpoint, "cache_hit")
                 return cached
 
+        lease_owner = f"{self.service}:{self.run_id}"
+        lease_acquired = False
+        if policy.ttl_seconds:
+            lease_acquired = self.cache.acquire_lease(
+                key,
+                lease_owner,
+                lease_seconds=min(30, max(5, policy.ttl_seconds)),
+            )
+            if not lease_acquired:
+                # Another bot/repo is fetching this key. Give it a short window
+                # to publish the shared result before issuing a duplicate request.
+                for _ in range(6):
+                    time.sleep(0.35)
+                    cached = self.cache.get(key, policy.ttl_seconds)
+                    if cached is not None:
+                        self.meter.record(endpoint, "cache_hit")
+                        return cached
+
         started = time.monotonic()
         if count_loader_attempt:
             self.meter.record_attempt(endpoint)
         try:
-            value = loader()
-            if validate is not None and not validate(value):
-                raise ValueError(f"{endpoint} returned an invalid payload")
-        except Exception:
-            latency = (time.monotonic() - started) * 1000
-            self.meter.record(endpoint, "upstream_error", latency_ms=latency)
-            if policy.stale_if_error_seconds:
-                stale = self.cache.get(key, policy.stale_if_error_seconds)
-                if stale is not None:
-                    self.meter.record(endpoint, "stale_hit")
-                    emit(
-                        "data_gateway.stale_fallback",
-                        service=self.service,
-                        endpoint=endpoint,
-                        max_age_seconds=policy.stale_if_error_seconds,
-                    )
-                    return stale
-            raise
+            try:
+                value = loader()
+                if validate is not None and not validate(value):
+                    raise ValueError(f"{endpoint} returned an invalid payload")
+            except Exception:
+                latency = (time.monotonic() - started) * 1000
+                self.meter.record(endpoint, "upstream_error", latency_ms=latency)
+                if policy.stale_if_error_seconds:
+                    stale = self.cache.get(key, policy.stale_if_error_seconds)
+                    if stale is not None:
+                        self.meter.record(endpoint, "stale_hit")
+                        emit(
+                            "data_gateway.stale_fallback",
+                            service=self.service,
+                            endpoint=endpoint,
+                            max_age_seconds=policy.stale_if_error_seconds,
+                        )
+                        return stale
+                raise
 
-        latency = (time.monotonic() - started) * 1000
-        if policy.ttl_seconds or policy.stale_if_error_seconds:
-            self.cache.set(key, value)
-        self.meter.record(endpoint, "upstream_success", latency_ms=latency)
-        return value
+            latency = (time.monotonic() - started) * 1000
+            if policy.ttl_seconds or policy.stale_if_error_seconds:
+                self.cache.set(key, value)
+            self.meter.record(endpoint, "upstream_success", latency_ms=latency)
+            return value
+        finally:
+            if lease_acquired:
+                self.cache.release_lease(key, lease_owner)
 
     def get_json(
         self,
