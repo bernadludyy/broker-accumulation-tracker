@@ -1,0 +1,37 @@
+name: Phase 3 Production Verify
+
+on:
+  push:
+    paths:
+      - "phase3_shared_probe.py"
+      - ".github/workflows/phase3_production_verify.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase3-production-verify
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PROJECT_FABRIC_DATABASE_URL: ${{ secrets.PROJECT_FABRIC_DATABASE_URL }}
+      PROJECT_FABRIC_CACHE_NAMESPACE: shared-v1
+      PROJECT_FABRIC_DB_REQUIRED: "true"
+      PHASE3_PROBE_SERVICE: broker-accumulation-tracker
+      PHASE3_PROBE_MODE: consumer
+      PHASE3_EXPECTED_PRODUCER: powerfull-momentum-bot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements_github.txt
+      - name: Require Neon shared backend
+        run: python -m project_fabric.db_admin status --require
+      - name: Consume cache seeded by another repository
+        run: python phase3_shared_probe.py
