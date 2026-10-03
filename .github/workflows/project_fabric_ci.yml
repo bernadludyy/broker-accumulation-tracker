@@ -15,6 +15,24 @@ jobs:
   fabric:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: fabric
+          POSTGRES_PASSWORD: fabric
+          POSTGRES_DB: fabric_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fabric -d fabric_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PROJECT_FABRIC_DATABASE_URL: postgresql://fabric:fabric@localhost:5432/fabric_test
+      PROJECT_FABRIC_CACHE_NAMESPACE: phase3-ci-${{ github.run_id }}
+      PROJECT_FABRIC_DB_REQUIRED: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -28,5 +46,7 @@ jobs:
         run: python -m compileall -q project_fabric tracker.py entry_engine.py telegram_query_bot.py daily_runner.py bot_io.py
       - name: Framework self-check
         run: python -m project_fabric.selfcheck
+      - name: Shared database migration check
+        run: python -m project_fabric.db_admin migrate --require
       - name: Unit and integration tests
         run: python -m unittest discover -s tests -v
