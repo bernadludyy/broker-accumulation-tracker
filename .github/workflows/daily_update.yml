@@ -48,7 +48,7 @@ jobs:
         run: python -m project_fabric.selfcheck
 
       - name: Shared cache backend status
-        run: python -m project_fabric.db_admin status
+        run: python -m project_fabric.db_admin status --require
 
       - name: Restore Project Fabric cache
         uses: actions/cache/restore@v4
