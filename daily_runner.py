@@ -21,6 +21,9 @@ BASE_DIR = Path(__file__).resolve().parent
 os.chdir(BASE_DIR)
 
 import tracker
+from project_fabric.observability import ObservabilityClient
+
+_OBS = ObservabilityClient("broker-accumulation-tracker")
 
 
 # ============================================================
@@ -1156,8 +1159,64 @@ def main() -> None:
             "Sending Telegram..."
         )
 
-        response = tracker.send_telegram(
-            message_final
+        signal_count = 0
+        for _, obs_row in telegram_result.iterrows():
+            ticker = str(obs_row.get("ticker") or "").upper().strip()
+            if not ticker:
+                continue
+
+            raw_score = (
+                obs_row.get("final_score")
+                if obs_row.get("final_score") is not None
+                else obs_row.get("score")
+            )
+            try:
+                score = float(raw_score) if raw_score is not None else None
+            except (TypeError, ValueError):
+                score = None
+
+            _OBS.record_signal(
+                signal_type="BROKER_DASHBOARD",
+                entity=ticker,
+                score=score,
+                status="daily_watchlist",
+                payload={
+                    "safe_end_date": safe_end_date,
+                    "final_label": obs_row.get("final_label"),
+                    "flow_alignment": obs_row.get("flow_alignment"),
+                    "ytd_label": obs_row.get("ytd_label"),
+                    "avg_buy_price": obs_row.get("avg_buy_price"),
+                    "last_price": obs_row.get("last_price"),
+                },
+            )
+            signal_count += 1
+
+        try:
+            response = tracker.send_telegram(
+                message_final
+            )
+        except Exception:
+            _OBS.record_delivery(
+                channel="telegram",
+                status="failed",
+                destination="configured-telegram-target",
+                metadata={
+                    "signal_count": signal_count,
+                    "safe_end_date": safe_end_date,
+                    "message_type": "broker_dashboard",
+                },
+            )
+            raise
+
+        _OBS.record_delivery(
+            channel="telegram",
+            status="success",
+            destination="configured-telegram-target",
+            metadata={
+                "signal_count": signal_count,
+                "safe_end_date": safe_end_date,
+                "message_type": "broker_dashboard",
+            },
         )
 
         mark_as_sent(

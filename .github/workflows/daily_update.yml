@@ -22,6 +22,7 @@ jobs:
     env:
       PROJECT_FABRIC_DATABASE_URL: ${{ secrets.PROJECT_FABRIC_DATABASE_URL }}
       PROJECT_FABRIC_CACHE_NAMESPACE: shared-v1
+      PROJECT_FABRIC_DB_REQUIRED: "true"
       ZPI_API_KEY: ${{ secrets.ZPI_API_KEY }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -49,6 +50,12 @@ jobs:
 
       - name: Shared cache backend status
         run: python -m project_fabric.db_admin status --require
+
+      - name: Phase 4 run start
+        run: python -m project_fabric.observability run-start --service broker-accumulation-tracker --require
+
+      - name: Phase 4 database health
+        run: python -m project_fabric.observability health --service broker-accumulation-tracker --component shared_database --status ok --require
 
       - name: Restore Project Fabric cache
         uses: actions/cache/restore@v4
@@ -105,3 +112,9 @@ jobs:
 
           git commit -m "bot: daily broker update [skip ci]"
           git push
+
+      - name: Phase 4 run finish
+        if: always()
+        env:
+          FABRIC_JOB_STATUS: ${{ job.status }}
+        run: python -m project_fabric.observability run-finish --service broker-accumulation-tracker --status "$FABRIC_JOB_STATUS" --require

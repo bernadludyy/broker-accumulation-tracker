@@ -19,6 +19,8 @@ class Phase3SharedCacheTests(unittest.TestCase):
     def setUpClass(cls):
         cls.url = os.environ["PROJECT_FABRIC_DATABASE_URL"]
         cls.namespace = f"phase3-test-{os.getenv('GITHUB_RUN_ID', 'local')}"
+        cls._previous_namespace = os.environ.get("PROJECT_FABRIC_CACHE_NAMESPACE")
+        os.environ["PROJECT_FABRIC_CACHE_NAMESPACE"] = cls.namespace
         cls.admin = PostgresTTLCache(
             cls.url,
             namespace=cls.namespace,
@@ -30,6 +32,10 @@ class Phase3SharedCacheTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.admin.clear_namespace()
+        if cls._previous_namespace is None:
+            os.environ.pop("PROJECT_FABRIC_CACHE_NAMESPACE", None)
+        else:
+            os.environ["PROJECT_FABRIC_CACHE_NAMESPACE"] = cls._previous_namespace
 
     def setUp(self):
         self.admin.clear_namespace()
