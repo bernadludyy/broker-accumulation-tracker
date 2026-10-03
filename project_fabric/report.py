@@ -5,6 +5,8 @@ import json
 import os
 from pathlib import Path
 
+from .postgres_backend import PostgresTTLCache, configured_database_url
+
 
 def _report_path() -> Path:
     root = Path(os.getenv("FABRIC_RUNTIME_DIR", ".runtime/project_fabric"))
@@ -56,6 +58,30 @@ def main() -> int:
         }
 
     print(json.dumps(data, ensure_ascii=False, sort_keys=True, indent=2))
+
+    database_url = configured_database_url()
+    if database_url:
+        required = os.getenv("PROJECT_FABRIC_DB_REQUIRED", "").strip().lower() in {
+            "1", "true", "yes", "on"
+        }
+        try:
+            namespace = (
+                os.getenv("PROJECT_FABRIC_CACHE_NAMESPACE", "shared-v1").strip()
+                or "shared-v1"
+            )
+            PostgresTTLCache(
+                database_url,
+                namespace=namespace,
+                service=str(data.get("service") or "report"),
+                auto_migrate=True,
+            ).persist_usage(data)
+        except Exception as exc:
+            print(
+                f"Project Fabric usage database persistence failed: {type(exc).__name__}",
+            )
+            if required:
+                raise
+
     if args.github_summary:
         summary = os.getenv("GITHUB_STEP_SUMMARY")
         if summary:
