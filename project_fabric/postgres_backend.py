@@ -104,6 +104,89 @@ class PostgresTTLCache:
                 PRIMARY KEY (service, run_id)
             )
             """,
+            """
+            CREATE TABLE IF NOT EXISTS project_fabric.bot_runs (
+                service TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                workflow TEXT,
+                event TEXT,
+                ref TEXT,
+                sha TEXT,
+                status TEXT NOT NULL,
+                started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                finished_at TIMESTAMPTZ,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+                metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+                PRIMARY KEY (service, run_id)
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_project_fabric_bot_runs_started
+            ON project_fabric.bot_runs (started_at DESC)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_project_fabric_bot_runs_status
+            ON project_fabric.bot_runs (service, status, updated_at DESC)
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS project_fabric.signal_events (
+                event_id TEXT PRIMARY KEY,
+                service TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                signal_type TEXT NOT NULL,
+                entity TEXT,
+                score DOUBLE PRECISION,
+                status TEXT NOT NULL DEFAULT 'observed',
+                occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                payload JSONB NOT NULL DEFAULT '{}'::jsonb
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_project_fabric_signal_recent
+            ON project_fabric.signal_events (occurred_at DESC)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_project_fabric_signal_service
+            ON project_fabric.signal_events (service, occurred_at DESC)
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS project_fabric.delivery_events (
+                event_id TEXT PRIMARY KEY,
+                service TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                signal_event_id TEXT,
+                channel TEXT NOT NULL,
+                destination_hash TEXT,
+                status TEXT NOT NULL,
+                occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                metadata JSONB NOT NULL DEFAULT '{}'::jsonb
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_project_fabric_delivery_recent
+            ON project_fabric.delivery_events (occurred_at DESC)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_project_fabric_delivery_service
+            ON project_fabric.delivery_events (service, occurred_at DESC)
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS project_fabric.health_checks (
+                event_id TEXT PRIMARY KEY,
+                service TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                component TEXT NOT NULL,
+                status TEXT NOT NULL,
+                checked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                latency_ms DOUBLE PRECISION,
+                detail JSONB NOT NULL DEFAULT '{}'::jsonb
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_project_fabric_health_recent
+            ON project_fabric.health_checks (service, component, checked_at DESC)
+            """,
         )
         try:
             with self._connect() as con:
