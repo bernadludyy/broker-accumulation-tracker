@@ -33,6 +33,7 @@ jobs:
       PROJECT_FABRIC_DATABASE_URL: postgresql://fabric:fabric@localhost:5432/fabric_test
       PROJECT_FABRIC_CACHE_NAMESPACE: phase3-ci-${{ github.run_id }}
       PROJECT_FABRIC_DB_REQUIRED: "true"
+      PROJECT_FABRIC_INTEGRATION_TESTS: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
