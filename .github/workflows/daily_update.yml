@@ -20,6 +20,8 @@ jobs:
     timeout-minutes: 180
 
     env:
+      PROJECT_FABRIC_DATABASE_URL: ${{ secrets.PROJECT_FABRIC_DATABASE_URL }}
+      PROJECT_FABRIC_CACHE_NAMESPACE: shared-v1
       ZPI_API_KEY: ${{ secrets.ZPI_API_KEY }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -44,6 +46,9 @@ jobs:
 
       - name: Project Fabric preflight
         run: python -m project_fabric.selfcheck
+
+      - name: Shared cache backend status
+        run: python -m project_fabric.db_admin status
 
       - name: Restore Project Fabric cache
         uses: actions/cache/restore@v4
