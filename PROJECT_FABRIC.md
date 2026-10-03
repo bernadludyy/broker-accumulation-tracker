@@ -65,3 +65,20 @@ Do not cache highly time-sensitive quote/orderbook data unless the strategy expl
 Daily Broker Update and Telegram Query Worker now support the same shared PostgreSQL cache namespace as the momentum/scalping repositories. Configure the same `PROJECT_FABRIC_DATABASE_URL` secret in every repository and keep `PROJECT_FABRIC_CACHE_NAMESPACE=shared-v1`.
 
 The shared schema contains `cache_entries`, `cache_leases`, and `api_usage_runs`. Broker-summary, live quote/summary, and Telegram delivery remain uncached.
+
+
+## Phase 4 observability
+
+Phase 4 adds a durable control plane on top of the shared Neon database.
+
+Production workflows now publish:
+- run lifecycle into `project_fabric.bot_runs`;
+- component health into `project_fabric.health_checks`;
+- strategy/business signals into `project_fabric.signal_events`;
+- delivery outcomes into `project_fabric.delivery_events`.
+
+The Broker Accumulation runtime requires the shared database before execution and keeps secrets out of the observability payload. Telegram destinations are hashed rather than stored in plaintext.
+
+A production probe workflow writes verification-only events and validates all four Phase 4 tables. Verification rows are marked and excluded from the central dashboard.
+
+The central Control Center lives in `powerfull-momentum-bot/control_center` and reads all five services from the same Neon database. Its GitHub Actions workflow produces a self-contained `index.html` plus `snapshot.json` artifact every 15 minutes and on relevant Control Center changes.
