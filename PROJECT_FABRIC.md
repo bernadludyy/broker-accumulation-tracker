@@ -28,7 +28,7 @@ Phase 1 (this PR) is deliberately non-breaking: add the framework, tests, CI, an
 
 Phase 2: COMPLETE. Broker/IDX reads are now wrapped by `DataGateway` for endpoint freshness, safe cache reuse and per-run API telemetry. Existing `bot_io.get_json` remains the bounded transport adapter, preserving its tested retry/error behavior. Live quote/summary and broker-summary remain uncached; reference IDX endpoints use bounded TTLs.
 
-Phase 3: introduce `DATABASE_URL` with PostgreSQL/Neon as persistent production storage while retaining SQLite as local fallback. The existing stock-summary snapshot tables and the Phase 2 gateway provide the migration boundary.
+Phase 3: shared PostgreSQL/Neon cache backend implemented. Compatible cache keys can be reused across repositories through one `PROJECT_FABRIC_DATABASE_URL`, while SQLite snapshots and local JSON remain resilience layers.
 
 Phase 4: central dashboard/observability can read the persistent run, API-usage, signal, and delivery tables.
 
@@ -58,3 +58,10 @@ Do not cache highly time-sensitive quote/orderbook data unless the strategy expl
 - `pluang:quote` and `pluang:summary`: live/no cache.
 - Telegram delivery is never cached or automatically replayed.
 - Existing database snapshots remain the primary reusable daily-data store.
+
+
+## Phase 3 shared-cache architecture
+
+Daily Broker Update and Telegram Query Worker now support the same shared PostgreSQL cache namespace as the momentum/scalping repositories. Configure the same `PROJECT_FABRIC_DATABASE_URL` secret in every repository and keep `PROJECT_FABRIC_CACHE_NAMESPACE=shared-v1`.
+
+The shared schema contains `cache_entries`, `cache_leases`, and `api_usage_runs`. Broker-summary, live quote/summary, and Telegram delivery remain uncached.
