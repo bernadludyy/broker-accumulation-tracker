@@ -321,3 +321,38 @@ class EntryTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TelegramWorkflowTests(unittest.TestCase):
+    def test_query_worker_stays_latency_first(self):
+        workflow = (
+            Path(__file__).resolve().parents[1]
+            / ".github"
+            / "workflows"
+            / "telegram_query.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            "Process Telegram repository_dispatch",
+            workflow,
+        )
+        self.assertNotIn(
+            "Project Fabric preflight",
+            workflow,
+        )
+        self.assertNotIn(
+            "Shared cache backend status",
+            workflow,
+        )
+        self.assertNotIn(
+            "Phase 4 run start",
+            workflow,
+        )
+        self.assertNotIn(
+            "Restore Project Fabric cache",
+            workflow,
+        )
+        self.assertNotIn(
+            "Upload Project Fabric usage",
+            workflow,
+        )
