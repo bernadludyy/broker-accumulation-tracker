@@ -1,6 +1,6 @@
 name: Telegram Query Worker
 
-# Keep this path latency-first: Telegram commands must not depend on Project Fabric preflight/telemetry.
+# Keep this path latency-first: Telegram commands must not depend on blocking framework checks.
 
 on:
   repository_dispatch:
