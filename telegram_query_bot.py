@@ -23,8 +23,10 @@ from foreign_entry import format_foreign_entry, format_foreign_entry_scan
 from bot_io import split_message, send_message
 from entry_engine import (
     add_indicators,
+    calculate_fibonacci_golden_ratio,
     calculate_levels,
     determine_trend,
+    format_fibonacci_report,
     format_scanner_report,
     load_stock_history,
 )
@@ -2691,6 +2693,10 @@ def build_scalp_tomorrow_setup(
         ema50,
     )
     levels = calculate_levels(df)
+    fib = calculate_fibonacci_golden_ratio(
+        df,
+        50,
+    )
 
     support = float(
         levels["support1"]
@@ -2982,6 +2988,18 @@ def build_scalp_tomorrow_setup(
             breakout_level,
         "breakout_entry":
             breakout_entry,
+        "fib_direction":
+            fib["direction"],
+        "fib_618":
+            fib["fib_618"],
+        "fib_650":
+            fib["fib_650"],
+        "fib_golden_low":
+            fib["golden_low"],
+        "fib_golden_high":
+            fib["golden_high"],
+        "fib_position":
+            fib["position"],
         "pullback_low":
             pullback_low,
         "pullback_high":
@@ -3095,6 +3113,21 @@ def format_scalp_tomorrow_ticker(
         (
             f"Resistance: "
             f"{format_price(row['resistance'])}"
+        ),
+        "",
+        "FIBONACCI GOLDEN POCKET",
+        (
+            f"> Impulse: "
+            f"{row['fib_direction']}"
+        ),
+        (
+            f"> 0.618–0.650: "
+            f"{format_price(row['fib_golden_low'])}"
+            f"–{format_price(row['fib_golden_high'])}"
+        ),
+        (
+            f"> Position: "
+            f"{row['fib_position']}"
         ),
         "",
         "ENTRY PLAN",
@@ -4362,6 +4395,19 @@ ADRO ENTRY SWING
 ADRO ENTRY DAYTRADE
 → Entry plan mode daytrade
 
+🌀 FIBONACCI GOLDEN RATIO
+ADRO FIBO
+ADRO FIBONACCI
+→ Golden Pocket 0.618–0.650 dari swing 50 hari
+
+ADRO FIBO 20D
+ADRO FIBO 50D
+ADRO FIBO 100D
+→ Ubah lookback Fibonacci
+
+FIBO ADRO
+→ Format alternatif
+
 🛠 WATCHLIST & DATABASE
 /add BBRI
 → Tambah watchlist + smart YTD backfill
@@ -4726,6 +4772,38 @@ def command_result(text: str, chat_id: str) -> str:
         if first_lower == "/ticker":
             return format_full_report(ticker)
 
+    # Fibonacci Golden Ratio / Golden Pocket
+    if first_lower in {"fibo", "fibonacci"}:
+        if len(parts) < 2:
+            return (
+                "❌ Format Fibonacci salah.\n"
+                "Contoh: FIBO ADRO"
+            )
+
+        fib_ticker = normalize_ticker(
+            parts[1]
+        )
+        lookback = next(
+            (
+                int(p[:-1])
+                for p in [
+                    item.upper()
+                    for item in parts[2:]
+                ]
+                if p in {
+                    "20D",
+                    "50D",
+                    "100D",
+                }
+            ),
+            50,
+        )
+
+        return format_fibonacci_report(
+            fib_ticker,
+            lookback,
+        )
+
     # Next-session scalping setup
     if first_lower == "scalp":
         return format_scalp_tomorrow_scan()
@@ -4913,6 +4991,25 @@ def command_result(text: str, chat_id: str) -> str:
     # BKSL CC NI 10D
     # BKSL CC NI 20D
     # BKSL CC NI YTD
+
+    if "FIBO" in tokens or "FIBONACCI" in tokens:
+        lookback = next(
+            (
+                int(p[:-1])
+                for p in tokens
+                if p in {
+                    "20D",
+                    "50D",
+                    "100D",
+                }
+            ),
+            50,
+        )
+
+        return format_fibonacci_report(
+            ticker,
+            lookback,
+        )
 
     if "SCALP" in tokens:
         return format_scalp_tomorrow_ticker(

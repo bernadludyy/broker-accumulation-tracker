@@ -84,6 +84,166 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+
+def calculate_fibonacci_golden_ratio(
+    df: pd.DataFrame,
+    lookback: int = 50,
+) -> dict[str, Any]:
+    """Calculate retracement levels and the 0.618-0.650 Golden Pocket.
+
+    The impulse direction is inferred from which extreme occurred first inside
+    the selected lookback window:
+    - swing low before swing high -> bullish impulse
+    - swing high before swing low -> bearish impulse
+
+    This is informational only; it does not change the entry score.
+    """
+    if df is None or df.empty:
+        raise ValueError("History Fibonacci kosong.")
+
+    required = {"date", "high", "low", "close"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(
+            f"Field Fibonacci tidak lengkap: {sorted(missing)}"
+        )
+
+    lookback = max(20, min(int(lookback), len(df)))
+    window = (
+        df.tail(lookback)
+        .dropna(subset=["date", "high", "low", "close"])
+        .reset_index(drop=True)
+    )
+
+    if len(window) < 2:
+        raise ValueError("History Fibonacci tidak cukup.")
+
+    low_pos = int(window["low"].astype(float).idxmin())
+    high_pos = int(window["high"].astype(float).idxmax())
+
+    swing_low = float(window.loc[low_pos, "low"])
+    swing_high = float(window.loc[high_pos, "high"])
+
+    if swing_high <= swing_low:
+        raise ValueError("Swing high/low Fibonacci tidak valid.")
+
+    low_date = pd.Timestamp(window.loc[low_pos, "date"]).date().isoformat()
+    high_date = pd.Timestamp(window.loc[high_pos, "date"]).date().isoformat()
+    latest = window.iloc[-1]
+    close = float(latest["close"])
+    latest_date = pd.Timestamp(latest["date"]).date().isoformat()
+
+    direction = "BULLISH" if low_pos < high_pos else "BEARISH"
+    price_range = swing_high - swing_low
+
+    ratios = (0.382, 0.500, 0.618, 0.650, 0.786)
+    levels: dict[float, float] = {}
+
+    for ratio in ratios:
+        if direction == "BULLISH":
+            levels[ratio] = swing_high - price_range * ratio
+        else:
+            levels[ratio] = swing_low + price_range * ratio
+
+    golden_low = min(levels[0.618], levels[0.650])
+    golden_high = max(levels[0.618], levels[0.650])
+
+    if golden_low <= close <= golden_high:
+        position = "IN GOLDEN POCKET"
+        distance_pct = 0.0
+    elif close > golden_high:
+        position = "ABOVE GOLDEN POCKET"
+        distance_pct = (
+            (close - golden_high) / golden_high * 100
+            if golden_high > 0
+            else 0.0
+        )
+    else:
+        position = "BELOW GOLDEN POCKET"
+        distance_pct = (
+            (golden_low - close) / golden_low * 100
+            if golden_low > 0
+            else 0.0
+        )
+
+    return {
+        "lookback": lookback,
+        "direction": direction,
+        "swing_low": swing_low,
+        "swing_low_date": low_date,
+        "swing_high": swing_high,
+        "swing_high_date": high_date,
+        "latest_date": latest_date,
+        "latest_price": close,
+        "fib_382": levels[0.382],
+        "fib_500": levels[0.500],
+        "fib_618": levels[0.618],
+        "fib_650": levels[0.650],
+        "fib_786": levels[0.786],
+        "golden_low": golden_low,
+        "golden_high": golden_high,
+        "position": position,
+        "distance_pct": distance_pct,
+    }
+
+
+def format_fibonacci_report(
+    ticker: str,
+    lookback: int = 50,
+) -> str:
+    ticker = ticker.strip().upper()
+    requested = max(20, min(int(lookback), 100))
+    history = load_stock_history(
+        ticker,
+        max(20, requested),
+    )
+    fib = calculate_fibonacci_golden_ratio(
+        history,
+        requested,
+    )
+
+    direction_note = (
+        "retracement support"
+        if fib["direction"] == "BULLISH"
+        else "retracement resistance"
+    )
+
+    return "\n".join(
+        [
+            f"🌀 FIBONACCI GOLDEN RATIO — {ticker}",
+            f"Data: {fib['latest_date']}",
+            f"Lookback: {fib['lookback']} trading days",
+            f"Impulse: {fib['direction']}",
+            (
+                f"Swing Low: {_price(fib['swing_low'])} "
+                f"({fib['swing_low_date']})"
+            ),
+            (
+                f"Swing High: {_price(fib['swing_high'])} "
+                f"({fib['swing_high_date']})"
+            ),
+            "",
+            f"> Fib 0.382: {_price(fib['fib_382'])}",
+            f"> Fib 0.500: {_price(fib['fib_500'])}",
+            f"> Fib 0.618: {_price(fib['fib_618'])}",
+            f"> Fib 0.650: {_price(fib['fib_650'])}",
+            f"> Fib 0.786: {_price(fib['fib_786'])}",
+            "",
+            (
+                f"Golden Pocket 0.618–0.650: "
+                f"{_price(fib['golden_low'])} – "
+                f"{_price(fib['golden_high'])}"
+            ),
+            f"Latest Price: {_price(fib['latest_price'])}",
+            f"Position: {fib['position']}",
+            (
+                f"Distance to Golden Pocket: "
+                f"{fib['distance_pct']:.2f}%"
+            ),
+            f"Role: {direction_note}",
+        ]
+    )
+
 def calculate_levels(df: pd.DataFrame) -> dict[str, Any]:
     latest = df.iloc[-1]
     close = float(latest["close"])
@@ -192,6 +352,7 @@ def analyze_entry(ticker: str, mode: str = "SWING", *, history: pd.DataFrame | N
     volume_ratio = float(latest["volume_ratio"])
     trend = determine_trend(close, ema20, ema50)
     levels = calculate_levels(df)
+    fib = calculate_fibonacci_golden_ratio(df, 50)
 
     support1 = float(levels["support1"])
     support2 = float(levels["support2"])
@@ -294,6 +455,15 @@ def analyze_entry(ticker: str, mode: str = "SWING", *, history: pd.DataFrame | N
         "resistance2": resistance2,
         "breakout_level": breakout_level,
         "breakout_entry": breakout_entry,
+        "fib_direction": fib["direction"],
+        "fib_swing_low": fib["swing_low"],
+        "fib_swing_high": fib["swing_high"],
+        "fib_618": fib["fib_618"],
+        "fib_650": fib["fib_650"],
+        "fib_golden_low": fib["golden_low"],
+        "fib_golden_high": fib["golden_high"],
+        "fib_position": fib["position"],
+        "fib_distance_pct": fib["distance_pct"],
         "entry1_low": entry1_low,
         "entry1_high": entry1_high,
         "entry2_low": entry2_low,
@@ -727,6 +897,21 @@ def format_scanner_report(ticker: str, mode: str = "SWING") -> str:
             f"> RSI14: {data['rsi14']:.1f}",
             f"> MACD Hist: {data['macd_hist']:+.2f}",
             f"> Volume: {data['volume_ratio']:.2f}x Avg20",
+            "",
+            "🌀 FIBONACCI GOLDEN RATIO",
+            f"> Impulse: {data['fib_direction']}",
+            (
+                f"> Swing: {_price(data['fib_swing_low'])} "
+                f"→ {_price(data['fib_swing_high'])}"
+            ),
+            (
+                f"> Golden Pocket 0.618–0.650: "
+                f"{_price(data['fib_golden_low'])} – "
+                f"{_price(data['fib_golden_high'])}"
+            ),
+            f"> Fib 0.618: {_price(data['fib_618'])}",
+            f"> Fib 0.650: {_price(data['fib_650'])}",
+            f"> Position: {data['fib_position']}",
             "",
             "🚦 ENTRY FILTER",
         ]
