@@ -68,6 +68,40 @@ class Phase2GatewayTests(unittest.TestCase):
         self.assertEqual(policy.ttl_seconds, 300)
         self.assertEqual(policy.stale_if_error_seconds, 900)
 
+    def test_phase2_historical_market_data_uses_longer_cache(self):
+        historical_summary = market_policy(
+            "idx",
+            "stock-summary",
+            {"date": "2020-01-02"},
+        )
+        self.assertEqual(historical_summary.ttl_seconds, 21_600)
+        self.assertEqual(historical_summary.stale_if_error_seconds, 86_400)
+
+        current_foreign = market_policy("idx", "foreign-flow")
+        self.assertEqual(current_foreign.ttl_seconds, 300)
+        self.assertEqual(current_foreign.stale_if_error_seconds, 900)
+
+        historical_foreign = market_policy(
+            "idx",
+            "foreign-flow",
+            {"date": "2020-01-02"},
+        )
+        self.assertEqual(historical_foreign.ttl_seconds, 21_600)
+        self.assertEqual(historical_foreign.stale_if_error_seconds, 86_400)
+
+    def test_phase2_broker_summary_is_cache_first(self):
+        current_broker = market_policy("pluang", "broker-summary")
+        self.assertEqual(current_broker.ttl_seconds, 300)
+        self.assertEqual(current_broker.stale_if_error_seconds, 900)
+
+        historical_broker = market_policy(
+            "pluang",
+            "broker-summary",
+            {"startDate": "2020-01-02", "endDate": "2020-01-02"},
+        )
+        self.assertEqual(historical_broker.ttl_seconds, 21_600)
+        self.assertEqual(historical_broker.stale_if_error_seconds, 86_400)
+
 
 if __name__ == "__main__":
     unittest.main()
