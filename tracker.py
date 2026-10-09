@@ -380,6 +380,21 @@ def _get_idx(path: str, params: dict, timeout: int = 30) -> dict:
     return _unwrap_project_payload(payload)
 
 
+def peek_shared_stock_summary(
+    max_age_seconds: int = 7 * 24 * 60 * 60,
+):
+    """Read the shared current stock-summary cache without calling ZAPI."""
+    params = {"length": 5000, "start": 0}
+    payload = _GATEWAY.peek_cached(
+        endpoint="idx:stock-summary",
+        params=params,
+        max_age_seconds=max_age_seconds,
+    )
+    if payload is None:
+        return None
+    return _unwrap_project_payload(payload)
+
+
 def fetch_stock_summary(
     date: str | None = None,
     code: str | None = None,
