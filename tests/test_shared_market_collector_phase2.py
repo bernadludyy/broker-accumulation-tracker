@@ -1,0 +1,74 @@
+from __future__ import annotations
+
+import unittest
+from unittest.mock import patch
+
+import tracker
+
+
+class SharedMarketCollectorPhase2Tests(unittest.TestCase):
+    def test_stock_history_uses_canonical_120_and_trims_locally(self):
+        items = [
+            {"date": f"2026-10-{day:02d}", "close": day}
+            for day in range(30, 0, -1)
+        ]
+        items.extend(
+            {"date": f"2026-09-{day:02d}", "close": day}
+            for day in range(30, 0, -1)
+        )
+        items.extend(
+            {"date": f"2026-08-{day:02d}", "close": day}
+            for day in range(30, 0, -1)
+        )
+        items.extend(
+            {"date": f"2026-07-{day:02d}", "close": day}
+            for day in range(30, 0, -1)
+        )
+        payload = {
+            "project": "finance:idx:stock-history",
+            "data": {
+                "code": "TEST",
+                "count": 120,
+                "to": items[0]["date"],
+                "from": items[-1]["date"],
+                "items": items,
+            },
+        }
+
+        with patch.object(tracker, "_get_idx", return_value=payload) as get_idx:
+            result = tracker.fetch_stock_history("TEST", length=5)
+
+        get_idx.assert_called_once_with(
+            "stock-history",
+            {"code": "TEST", "length": 120},
+        )
+        self.assertEqual(result["data"]["count"], 5)
+        self.assertEqual(len(result["data"]["items"]), 5)
+        self.assertEqual(result["data"]["to"], items[0]["date"])
+        self.assertEqual(result["data"]["from"], items[4]["date"])
+
+        # Shared cached object must stay untouched.
+        self.assertEqual(payload["data"]["count"], 120)
+        self.assertEqual(len(payload["data"]["items"]), 120)
+
+    def test_foreign_flow_first_page_uses_canonical_length(self):
+        with patch.object(tracker, "_get_idx", return_value={"data": []}) as get_idx:
+            tracker.fetch_foreign_flow(length=20, start=0)
+
+        get_idx.assert_called_once_with(
+            "foreign-flow",
+            {"sort": "net", "length": 50, "start": 0},
+        )
+
+    def test_foreign_flow_nonzero_start_preserves_requested_page_size(self):
+        with patch.object(tracker, "_get_idx", return_value={"data": []}) as get_idx:
+            tracker.fetch_foreign_flow(length=20, start=10)
+
+        get_idx.assert_called_once_with(
+            "foreign-flow",
+            {"sort": "net", "length": 20, "start": 10},
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
