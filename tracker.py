@@ -6,6 +6,7 @@ import json
 import math
 import sqlite3
 import time
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Iterable, Optional
@@ -324,7 +325,7 @@ def _get(path: str, params: dict, timeout: int = 30) -> dict:
             params=params,
             timeout=timeout,
         ),
-        policy=market_policy("pluang", path),
+        policy=market_policy("pluang", path, params),
     )
 
 
@@ -339,7 +340,7 @@ def _get_idx(path: str, params: dict, timeout: int = 30) -> dict:
             params=params,
             timeout=timeout,
         ),
-        policy=market_policy("idx", path),
+        policy=market_policy("idx", path, params),
     )
 
 
@@ -365,32 +366,86 @@ def fetch_stock_summary(
         params,
     )
 
+CANONICAL_STOCK_HISTORY_LENGTH = 120
+
+
+def _trim_stock_history_payload(payload: dict, length: int) -> dict:
+    """Return only the newest requested bars without changing the shared cache."""
+    requested = max(1, int(length))
+    output = deepcopy(payload)
+
+    if not isinstance(output, dict):
+        return output
+
+    container = output.get("data")
+    if not isinstance(container, dict):
+        container = output
+
+    items = container.get("items")
+    if not isinstance(items, list):
+        return output
+
+    trimmed = items[:requested]
+    container["items"] = trimmed
+    container["count"] = len(trimmed)
+
+    if trimmed:
+        newest_date = trimmed[0].get("date") if isinstance(trimmed[0], dict) else None
+        oldest_date = trimmed[-1].get("date") if isinstance(trimmed[-1], dict) else None
+        if newest_date:
+            container["to"] = newest_date
+        if oldest_date:
+            container["from"] = oldest_date
+
+    return output
+
+
 def fetch_stock_history(
     ticker: str,
-    length: int = 100,
+    length: int = CANONICAL_STOCK_HISTORY_LENGTH,
 ) -> dict:
     ticker = ticker.upper().strip()
+    requested = max(1, int(length))
+    upstream_length = max(CANONICAL_STOCK_HISTORY_LENGTH, requested)
 
-    return _get_idx(
+    payload = _get_idx(
         "stock-history",
         {
             "code": ticker,
-            "length": int(length),
+            "length": upstream_length,
         },
     )
+
+    if requested >= upstream_length:
+        return payload
+    return _trim_stock_history_payload(payload, requested)
+
+
+CANONICAL_FOREIGN_FLOW_LENGTH = 50
 
 
 def fetch_foreign_flow(
     date: str | None = None,
     code: str | None = None,
     sort: str = "net",
-    length: int = 50,
+    length: int = CANONICAL_FOREIGN_FLOW_LENGTH,
     start: int = 0,
 ) -> dict:
+    requested_length = max(1, int(length))
+    requested_start = max(0, int(start))
+
+    # Common leaderboard requests share one canonical first-page cache key.
+    # Callers already apply their final display limit locally.
+    upstream_length = (
+        max(CANONICAL_FOREIGN_FLOW_LENGTH, requested_length)
+        if requested_start == 0
+        else requested_length
+    )
+
     params: dict = {
         "sort": sort,
-        "length": int(length),
-        "start": int(start),
+        "length": upstream_length,
+        "start": requested_start,
     }
 
     if date:
