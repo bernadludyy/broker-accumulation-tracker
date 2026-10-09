@@ -258,7 +258,45 @@ class CombinedTests(unittest.TestCase):
 
         self.assertIn('TOP FREQUENCY IDX', text)
         self.assertIn('AAAA', text)
-        self.assertIn('Freq #1', text)
+        self.assertIn('Freq : #1', text)
+
+    def test_rupiah_value_uses_indonesian_unit_and_decimal_comma(self):
+        self.assertEqual(
+            b._compact_rupiah(16_377_130_000),
+            'Rp +16,38 Miliar',
+        )
+        self.assertEqual(
+            b._compact_rupiah(-3_094_659_400),
+            'Rp -3,09 Miliar',
+        )
+
+    def test_market_output_is_multiline_and_marks_estimated_foreign_value(self):
+        dssa = dict(
+            row('DSSA'),
+            Frequency=19_747,
+            OpenPrice=1_140,
+            Close=1_100,
+        )
+        dssa.pop('NetForeignValue', None)
+        dssa['ForeignBuy'] = 60_604_600
+        dssa['ForeignSell'] = 45_716_300
+
+        with patch.object(
+            b,
+            'load_shared_live_market',
+            return_value=(
+                [dssa],
+                '2026-10-08',
+                'NEON SHARED LAST MARKET SNAPSHOT | OFF-HOURS',
+            ),
+        ):
+            text = b.format_bot2_market_command('MARKET', limit=20)
+
+        self.assertIn('1. DSSA', text)
+        self.assertIn('→ Freq : #1 (19,747)', text)
+        self.assertIn('→ Net Foreign : #1 (Rp +16,38 Miliar*)', text)
+        self.assertIn('→ Koreksi : -3,51% (Close 1,100)', text)
+        self.assertIn('Net Foreign Value estimasi', text)
 
     def test_market_confluence_and_ticker_view(self):
         a = row('AAAA')
