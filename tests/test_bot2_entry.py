@@ -196,13 +196,16 @@ class CombinedTests(unittest.TestCase):
         b_row['NetForeignValue'] = 3_000_000
         rows = [a, b_row]
         with patch.object(
-            b.tracker,
-            'fetch_stock_summary',
-            return_value={'data': rows},
-        ) as fetch:
+            b,
+            'load_shared_live_market',
+            return_value=(
+                rows,
+                '2026-10-01',
+                'PROJECT FABRIC SHARED LIVE STOCK-SUMMARY',
+            ),
+        ):
             text = b.format_bot2_market_command('FREQ', limit=2)
 
-        fetch.assert_called_once_with(length=5000, start=0)
         self.assertIn('TOP FREQUENCY IDX', text)
         self.assertIn('AAAA', text)
         self.assertIn('Freq #1', text)
