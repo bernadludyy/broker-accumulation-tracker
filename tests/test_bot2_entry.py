@@ -96,6 +96,41 @@ class CombinedTests(unittest.TestCase):
             text=b.format_bot2_entry()
         self.assertIn('Lolos gabungan: 0',text)
 
+    def test_shared_market_views_use_shared_stock_summary(self):
+        rows = [
+            row('AAAA', Frequency=500, NetForeignValue=5_000_000),
+            row('BBBB', Frequency=300, NetForeignValue=3_000_000),
+        ]
+        with patch.object(
+            b.tracker,
+            'fetch_stock_summary',
+            return_value={'data': rows},
+        ) as fetch:
+            text = b.format_bot2_market_command('FREQ', limit=2)
+
+        fetch.assert_called_once_with(length=5000, start=0)
+        self.assertIn('TOP FREQUENCY IDX', text)
+        self.assertIn('AAAA', text)
+        self.assertIn('Freq #1', text)
+
+    def test_market_confluence_and_ticker_view(self):
+        rows = [
+            row('AAAA', Frequency=500, NetForeignValue=5_000_000),
+            row('BBBB', Frequency=300, NetForeignValue=3_000_000),
+        ]
+        with patch.object(
+            b,
+            'load_shared_live_market',
+            return_value=(rows, '2026-10-01', 'PROJECT FABRIC SHARED STOCK-SUMMARY'),
+        ):
+            market_text = b.format_bot2_market_command('MARKET', limit=10)
+            ticker_text = b.format_bot2_market_command('MARKET', ticker='AAAA')
+
+        self.assertIn('BOT2 MARKET CONFLUENCE', market_text)
+        self.assertIn('AAAA', market_text)
+        self.assertIn('BOT2 DATA — AAAA', ticker_text)
+        self.assertIn('Status prefilter: LOLOS', ticker_text)
+
     def test_command_routes(self):
         with patch.object(bot,'format_bot2_entry',return_value='ok') as mock:
             self.assertEqual(bot.command_result('FOREIGN ENTRY BOT2','123'),'ok')
@@ -109,5 +144,20 @@ class CombinedTests(unittest.TestCase):
         with patch.object(bot,'format_bot2_entry',return_value='ok') as mock:
             self.assertEqual(bot.command_result('ADRO FOREIGN ENTRY BOT2 REFRESH','123'),'ok')
             mock.assert_called_once_with('ADRO','SWING', force_refresh=True)
+        with patch.object(bot,'format_bot2_market_command',return_value='market') as mock:
+            self.assertEqual(bot.command_result('TOP FREQ 20','123'),'market')
+            mock.assert_called_once_with('FREQ', limit=20)
+        with patch.object(bot,'format_bot2_market_command',return_value='foreign') as mock:
+            self.assertEqual(bot.command_result('NET FOREIGN 15','123'),'foreign')
+            mock.assert_called_once_with('FOREIGN', limit=15)
+        with patch.object(bot,'format_bot2_market_command',return_value='correction') as mock:
+            self.assertEqual(bot.command_result('KOREKSI 12','123'),'correction')
+            mock.assert_called_once_with('KOREKSI', limit=12)
+        with patch.object(bot,'format_bot2_market_command',return_value='confluence') as mock:
+            self.assertEqual(bot.command_result('BOT2 MARKET 10','123'),'confluence')
+            mock.assert_called_once_with('MARKET', limit=10)
+        with patch.object(bot,'format_bot2_market_command',return_value='ticker') as mock:
+            self.assertEqual(bot.command_result('ADRO BOT2 DATA','123'),'ticker')
+            mock.assert_called_once_with('MARKET', ticker='ADRO')
 
 if __name__=='__main__': unittest.main()
