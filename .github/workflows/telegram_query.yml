@@ -30,6 +30,9 @@ jobs:
     timeout-minutes: 120
 
     env:
+      PROJECT_FABRIC_DATABASE_URL: ${{ secrets.PROJECT_FABRIC_DATABASE_URL }}
+      PROJECT_FABRIC_CACHE_NAMESPACE: shared-v1
+      PROJECT_FABRIC_DB_REQUIRED: "true"
       ZPI_API_KEY: ${{ secrets.ZPI_API_KEY }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
