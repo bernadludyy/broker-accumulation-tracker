@@ -29,15 +29,51 @@ _LIVE = CachePolicy()
 _MARKET_POLICIES: dict[tuple[str, str], CachePolicy] = {
     ("idx", "stock-summary"): CachePolicy(300, 900),
     ("idx", "stock-history"): CachePolicy(21_600, 86_400),
-    ("idx", "foreign-flow"): CachePolicy(120, 600),
+    ("idx", "foreign-flow"): CachePolicy(300, 900),
     ("idx", "company-announcements"): CachePolicy(21_600, 86_400),
     ("idx", "top-movers"): CachePolicy(30, 120),
 }
 
 
-def market_policy(family: str, endpoint: str) -> CachePolicy:
-    """Central freshness contract. Live quote/orderbook/trades are never cached."""
+def _is_historical_iso_date(value: Any) -> bool:
+    if not value:
+        return False
+    text = str(value).strip()
+    if len(text) < 10:
+        return False
+    return text[:10] < now_jakarta().date().isoformat()
+
+
+def market_policy(
+    family: str,
+    endpoint: str,
+    params: dict[str, Any] | None = None,
+) -> CachePolicy:
+    """Central freshness contract for shared market data.
+
+    Current-session foreign flow and broker summary stay fresh for five minutes.
+    Historical dated requests can be reused for six hours because completed
+    exchange sessions change rarely. Live quote/orderbook/trades remain uncached.
+    """
     key = (family.strip().lower(), endpoint.strip().lstrip("/").lower())
+    request_params = params or {}
+
+    if key == ("idx", "stock-summary"):
+        if _is_historical_iso_date(request_params.get("date")):
+            return CachePolicy(21_600, 86_400)
+        return CachePolicy(300, 900)
+
+    if key == ("idx", "foreign-flow"):
+        if _is_historical_iso_date(request_params.get("date")):
+            return CachePolicy(21_600, 86_400)
+        return CachePolicy(300, 900)
+
+    if key == ("pluang", "broker-summary"):
+        end_date = request_params.get("endDate") or request_params.get("startDate")
+        if _is_historical_iso_date(end_date):
+            return CachePolicy(21_600, 86_400)
+        return CachePolicy(300, 900)
+
     return _MARKET_POLICIES.get(key, _LIVE)
 
 
