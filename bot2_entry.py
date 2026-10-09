@@ -312,18 +312,23 @@ def load_shared_live_market(with_source=False, now=None):
     return result if with_source else rows
 
 
+def _decimal_comma(value, digits=2):
+    return f'{float(value):.{int(digits)}f}'.replace('.', ',')
+
+
 def _compact_rupiah(value):
+    """Human-readable IDR value with unambiguous Indonesian units."""
     value = float(value or 0)
     sign = '+' if value > 0 else '-' if value < 0 else ''
     amount = abs(value)
     if amount >= 1_000_000_000_000:
-        return f'Rp {sign}{amount / 1_000_000_000_000:.2f} T'
+        return f'Rp {sign}{_decimal_comma(amount / 1_000_000_000_000)} Triliun'
     if amount >= 1_000_000_000:
-        return f'Rp {sign}{amount / 1_000_000_000:.2f} B'
+        return f'Rp {sign}{_decimal_comma(amount / 1_000_000_000)} Miliar'
     if amount >= 1_000_000:
-        return f'Rp {sign}{amount / 1_000_000:.2f} M'
+        return f'Rp {sign}{_decimal_comma(amount / 1_000_000)} Juta'
     if amount >= 1_000:
-        return f'Rp {sign}{amount / 1_000:.2f} K'
+        return f'Rp {sign}{_decimal_comma(amount / 1_000)} Ribu'
     return f'Rp {sign}{amount:,.0f}'
 
 
@@ -337,17 +342,25 @@ def _limit(value, default=10, maximum=50):
 
 def _correction_text(row):
     value = row.get('correction')
-    return f'{value:+.2f}%' if value is not None else 'N/A'
+    if value is None:
+        return 'N/A'
+    sign = '+' if value > 0 else ''
+    return f'{sign}{_decimal_comma(value)}%'
 
 
 def _estimated_note(rows):
     if any(bool(row.get('estimated')) for row in rows):
         return (
-            'Catatan: Net Foreign Value diturunkan dari '
-            '(Foreign Buy Shares - Foreign Sell Shares) × Close '
-            'jika stock-summary tidak menyediakan value langsung.'
+            '* Net Foreign Value estimasi = '
+            '(Foreign Buy Shares - Foreign Sell Shares) × Close, '
+            'karena stock-summary tidak menyediakan value rupiah langsung.'
         )
     return None
+
+
+def _foreign_value_text(row):
+    text = _compact_rupiah(row.get('net'))
+    return text + ('*' if row.get('estimated') else '')
 
 
 def format_bot2_market_command(kind='MARKET', limit=10, ticker=None):
@@ -368,13 +381,20 @@ def format_bot2_market_command(kind='MARKET', limit=10, ticker=None):
         row = market.get(code)
         if row is None:
             return f'❌ {code} tidak ditemukan pada stock-summary {day}.'
+        close_text = (
+            f'{row["close"]:,.0f}'
+            if row.get('close') is not None
+            else 'N/A'
+        )
         lines = [
             f'📊 BOT2 DATA — {code}',
-            f'Data: {day} | {source}',
-            f'Close: {row["close"]:,.0f}' if row.get('close') is not None else 'Close: N/A',
-            f'Koreksi open→close/current: {_correction_text(row)}',
-            f'Frequency: #{row["frequency_rank"]} | {row["frequency"]:,.0f}',
-            f'Net Foreign: #{row["foreign_rank"]} | {_compact_rupiah(row["net"])}',
+            f'Data: {day}',
+            f'Sumber: {source}',
+            '',
+            f'→ Freq : #{row["frequency_rank"]} ({row["frequency"]:,.0f})',
+            f'→ Net Foreign : #{row["foreign_rank"]} ({_foreign_value_text(row)})',
+            f'→ Koreksi : {_correction_text(row)} (Close {close_text})',
+            '',
             (
                 'Status prefilter: LOLOS ✅'
                 if not reasons_for(row)
@@ -430,7 +450,8 @@ def format_bot2_market_command(kind='MARKET', limit=10, ticker=None):
 
     lines = [
         title,
-        f'Data: {day} | {source}',
+        f'Data: {day}',
+        f'Sumber: {source}',
         f'Universe: {len(market)} saham',
         '',
     ]
@@ -439,19 +460,19 @@ def format_bot2_market_command(kind='MARKET', limit=10, ticker=None):
         lines.append('Belum ada saham yang memenuhi tampilan ini.')
         return '\n'.join(lines)
 
-    for row in selected:
-        lines.append(
-            f'#{len(lines)-3} {row["ticker"]} | '
-            f'Freq #{row["frequency_rank"]} ({row["frequency"]:,.0f}) | '
-            f'Foreign #{row["foreign_rank"]} ({_compact_rupiah(row["net"])}) | '
-            f'Koreksi {_correction_text(row)} | '
-            f'Close {row["close"]:,.0f}' if row.get('close') is not None
-            else (
-                f'#{len(lines)-3} {row["ticker"]} | '
-                f'Freq #{row["frequency_rank"]} | Foreign #{row["foreign_rank"]} | '
-                f'Koreksi {_correction_text(row)} | Close N/A'
-            )
+    for index, row in enumerate(selected, 1):
+        close_text = (
+            f'{row["close"]:,.0f}'
+            if row.get('close') is not None
+            else 'N/A'
         )
+        lines.extend([
+            f'{index}. {row["ticker"]}',
+            f'→ Freq : #{row["frequency_rank"]} ({row["frequency"]:,.0f})',
+            f'→ Net Foreign : #{row["foreign_rank"]} ({_foreign_value_text(row)})',
+            f'→ Koreksi : {_correction_text(row)} (Close {close_text})',
+            '',
+        ])
 
     note = _estimated_note(selected)
     if note:
