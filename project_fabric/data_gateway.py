@@ -382,6 +382,19 @@ class DataGateway:
             if lease_acquired:
                 self.cache.release_lease(key, lease_owner)
 
+    def peek_cached(
+        self,
+        *,
+        endpoint: str,
+        params: dict[str, Any] | None,
+        max_age_seconds: int | float,
+    ) -> Any | None:
+        """Read an existing shared cache entry without triggering upstream I/O."""
+        if max_age_seconds <= 0:
+            return None
+        key = self._cache_key(endpoint, params)
+        return self.cache.get(key, float(max_age_seconds))
+
     def get_json(
         self,
         *,
