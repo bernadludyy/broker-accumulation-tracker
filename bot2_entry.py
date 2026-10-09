@@ -1,5 +1,5 @@
 """Bot 2 market ranks/correction AND Bot 1 foreign entry gates."""
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import math
 import tracker
@@ -155,32 +155,86 @@ def _market_rows_from_payload(payload):
     return normalized
 
 
-def load_shared_live_market(with_source=False):
-    """Read the common Project Fabric stock-summary snapshot.
+def _previous_business_day(day):
+    current = day - timedelta(days=1)
+    while current.weekday() >= 5:
+        current -= timedelta(days=1)
+    return current
 
-    tracker.fetch_stock_summary is cache-first through Neon shared-v1 and only
-    refreshes ZAPI when the shared snapshot is stale or missing.
+
+def _market_day_in_progress(now):
+    """True from IDX opening until final close, including the lunch break."""
+    if now.weekday() >= 5:
+        return False
+    minute = now.hour * 60 + now.minute
+    return 9 * 60 <= minute <= 15 * 60 + 50
+
+
+def _latest_completed_market_day(now):
+    """Pick the latest completed weekday for stable off-hours ranking."""
+    if now.weekday() >= 5:
+        return _previous_business_day(now.date())
+
+    minute = now.hour * 60 + now.minute
+    if minute > 15 * 60 + 50:
+        return now.date()
+    return _previous_business_day(now.date())
+
+
+def load_shared_live_market(with_source=False, now=None):
+    """Load Bot 2 ranking input without forcing a live ZAPI call off-hours.
+
+    During the trading day, use the shared Project Fabric current stock-summary.
+    Before the open, after the final close, and on weekends, prefer the complete
+    persisted snapshot for the latest finished trading day. If it is not yet in
+    SQLite, load the date-specific ZAPI snapshot once; Project Fabric then caches
+    that historical request with the longer historical TTL.
     """
-    payload = tracker.fetch_stock_summary(length=5000, start=0)
-    rows = _market_rows_from_payload(payload)
+    now = now or datetime.now(ZoneInfo('Asia/Jakarta'))
 
-    trade_dates = sorted({
-        str(
-            row.get('Date')
-            or row.get('date')
-            or row.get('TradingDate')
-            or ''
-        )[:10]
-        for row in rows
-        if (
-            row.get('Date')
-            or row.get('date')
-            or row.get('TradingDate')
+    if _market_day_in_progress(now):
+        payload = tracker.fetch_stock_summary(length=5000, start=0)
+        rows = _market_rows_from_payload(payload)
+
+        trade_dates = sorted({
+            str(
+                row.get('Date')
+                or row.get('date')
+                or row.get('TradingDate')
+                or ''
+            )[:10]
+            for row in rows
+            if (
+                row.get('Date')
+                or row.get('date')
+                or row.get('TradingDate')
+            )
+        })
+        day = (
+            trade_dates[-1]
+            if trade_dates
+            else now.date().isoformat()
         )
-    })
-    day = trade_dates[-1] if trade_dates else datetime.now(ZoneInfo('Asia/Jakarta')).date().isoformat()
-    source = 'PROJECT FABRIC SHARED STOCK-SUMMARY'
-    return (rows, day, source) if with_source else rows
+        source = 'PROJECT FABRIC SHARED LIVE STOCK-SUMMARY'
+        return (rows, day, source) if with_source else rows
+
+    target_day = _latest_completed_market_day(now).isoformat()
+    cached = tracker.load_stock_summary_snapshot(target_day)
+    if cached is not None:
+        result = (cached, target_day, 'DAILY DATABASE SNAPSHOT')
+        return result if with_source else cached
+
+    rows, source = load_market(
+        target_day,
+        force_refresh=False,
+        with_source=True,
+    )
+    result = (
+        rows,
+        target_day,
+        f'{source} | OFF-HOURS {target_day}',
+    )
+    return result if with_source else rows
 
 
 def _compact_rupiah(value):
@@ -227,6 +281,10 @@ def format_bot2_market_command(kind='MARKET', limit=10, ticker=None):
         rows, day, source = load_shared_live_market(with_source=True)
         market = rank_market(rows)
     except Exception as exc:
+        print(
+            f"[BOT2-MARKET-ERROR] {type(exc).__name__}: "
+            f"{str(exc)[:240]}"
+        )
         detail = str(exc) if type(exc) is ValueError else 'Shared market data gagal; coba lagi.'
         return '⏳ BOT2 MARKET DATA — DATA BELUM VALID\n' + detail
 
