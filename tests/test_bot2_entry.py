@@ -98,18 +98,29 @@ class CombinedTests(unittest.TestCase):
             text=b.format_bot2_entry()
         self.assertIn('Lolos gabungan: 0',text)
 
-    def test_offhours_market_uses_completed_daily_snapshot_without_live_fetch(self):
+    def test_offhours_market_uses_latest_complete_daily_snapshot_without_live_fetch(self):
         saturday = datetime(
             2026, 10, 10, 1, 18,
             tzinfo=ZoneInfo('Asia/Jakarta'),
         )
-        cached = [row('AAAA'), row('BBBB')]
+        cached = [
+            dict(row('AAAA'), Date='2026-10-09'),
+            dict(row('BBBB'), Date='2026-10-09'),
+        ]
 
         with patch.object(
+            b.tracker,
+            'latest_stock_summary_snapshot_date',
+            return_value='2026-10-09',
+        ), patch.object(
             b.tracker,
             'load_stock_summary_snapshot',
             return_value=cached,
         ) as load_snapshot, patch.object(
+            b.tracker,
+            'peek_shared_stock_summary',
+            return_value=None,
+        ), patch.object(
             b.tracker,
             'fetch_stock_summary',
         ) as live_fetch:
@@ -120,29 +131,69 @@ class CombinedTests(unittest.TestCase):
 
         self.assertEqual(day, '2026-10-09')
         self.assertEqual(rows, cached)
-        self.assertIn('DAILY DATABASE SNAPSHOT', source)
+        self.assertIn('LATEST DAILY DATABASE SNAPSHOT', source)
         load_snapshot.assert_called_once_with('2026-10-09')
         live_fetch.assert_not_called()
 
-    def test_offhours_market_backfills_specific_completed_date_when_snapshot_missing(self):
+    def test_offhours_market_reuses_stale_neon_full_market_before_zapi(self):
         saturday = datetime(
             2026, 10, 10, 1, 18,
             tzinfo=ZoneInfo('Asia/Jakarta'),
         )
-        completed = [row('AAAA'), row('BBBB')]
+        shared_rows = [
+            dict(row('AAAA'), Date='2026-10-08'),
+            dict(row('BBBB'), Date='2026-10-08'),
+        ]
 
         with patch.object(
             b.tracker,
-            'load_stock_summary_snapshot',
+            'latest_stock_summary_snapshot_date',
+            return_value=None,
+        ), patch.object(
+            b.tracker,
+            'peek_shared_stock_summary',
+            return_value={'data': shared_rows},
+        ), patch.object(
+            b.tracker,
+            'save_stock_summary_snapshot',
+        ) as save_snapshot, patch.object(
+            b,
+            'load_market',
+        ) as load_market:
+            rows, day, source = b.load_shared_live_market(
+                with_source=True,
+                now=saturday,
+            )
+
+        self.assertEqual(day, '2026-10-08')
+        self.assertEqual(rows, shared_rows)
+        self.assertIn('NEON SHARED LAST MARKET SNAPSHOT', source)
+        save_snapshot.assert_called_once()
+        load_market.assert_not_called()
+
+    def test_offhours_market_calls_historical_zapi_only_when_no_recent_cache_exists(self):
+        saturday = datetime(
+            2026, 10, 10, 1, 18,
+            tzinfo=ZoneInfo('Asia/Jakarta'),
+        )
+        completed = [
+            dict(row('AAAA'), Date='2026-10-09'),
+            dict(row('BBBB'), Date='2026-10-09'),
+        ]
+
+        with patch.object(
+            b.tracker,
+            'latest_stock_summary_snapshot_date',
+            return_value=None,
+        ), patch.object(
+            b.tracker,
+            'peek_shared_stock_summary',
             return_value=None,
         ), patch.object(
             b,
             'load_market',
             return_value=(completed, 'ZAPI FRESH + TERSIMPAN'),
-        ) as load_market, patch.object(
-            b.tracker,
-            'fetch_stock_summary',
-        ) as live_fetch:
+        ) as load_market:
             rows, day, source = b.load_shared_live_market(
                 with_source=True,
                 now=saturday,
@@ -156,7 +207,6 @@ class CombinedTests(unittest.TestCase):
             force_refresh=False,
             with_source=True,
         )
-        live_fetch.assert_not_called()
 
     def test_trading_day_still_uses_shared_live_stock_summary(self):
         friday = datetime(
