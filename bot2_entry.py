@@ -155,6 +155,39 @@ def _market_rows_from_payload(payload):
     return normalized
 
 
+def _rows_trade_date(rows):
+    dates = sorted({
+        str(
+            row.get('Date')
+            or row.get('date')
+            or row.get('TradingDate')
+            or ''
+        )[:10]
+        for row in rows
+        if (
+            row.get('Date')
+            or row.get('date')
+            or row.get('TradingDate')
+        )
+    })
+    if len(dates) != 1:
+        return None
+    return dates[0]
+
+
+def _recent_snapshot_candidate(day, rows, source, now, max_age_days=7):
+    if not day or not rows:
+        return None
+    try:
+        parsed = datetime.strptime(day, '%Y-%m-%d').date()
+    except ValueError:
+        return None
+    age_days = (now.date() - parsed).days
+    if age_days < 0 or age_days > max_age_days:
+        return None
+    return (day, rows, source)
+
+
 def _previous_business_day(day):
     current = day - timedelta(days=1)
     while current.weekday() >= 5:
@@ -219,11 +252,60 @@ def load_shared_live_market(with_source=False, now=None):
         return (rows, day, source) if with_source else rows
 
     target_day = _latest_completed_market_day(now).isoformat()
-    cached = tracker.load_stock_summary_snapshot(target_day)
-    if cached is not None:
-        result = (cached, target_day, 'DAILY DATABASE SNAPSHOT')
-        return result if with_source else cached
+    candidates = []
 
+    # 1) Prefer the newest complete local daily snapshot already persisted.
+    local_day = tracker.latest_stock_summary_snapshot_date()
+    if local_day:
+        local_rows = tracker.load_stock_summary_snapshot(local_day)
+        candidate = _recent_snapshot_candidate(
+            local_day,
+            local_rows,
+            'LATEST DAILY DATABASE SNAPSHOT',
+            now,
+        )
+        if candidate is not None:
+            candidates.append(candidate)
+
+    # 2) Reuse Bot 4's latest shared full-market snapshot from Neon even if its
+    # live TTL has expired. This is read-only and never triggers ZAPI.
+    shared_payload = tracker.peek_shared_stock_summary()
+    if shared_payload is not None:
+        try:
+            shared_rows = _market_rows_from_payload(shared_payload)
+        except ValueError:
+            shared_rows = []
+        shared_day = _rows_trade_date(shared_rows)
+        candidate = _recent_snapshot_candidate(
+            shared_day,
+            shared_rows,
+            'NEON SHARED LAST MARKET SNAPSHOT',
+            now,
+        )
+        if candidate is not None:
+            candidates.append(candidate)
+
+    if candidates:
+        day, rows, source = max(candidates, key=lambda item: item[0])
+        # Persist a complete shared snapshot locally when possible so later
+        # commands no longer depend on Neon availability.
+        if source.startswith('NEON'):
+            try:
+                tracker.save_stock_summary_snapshot(
+                    day,
+                    rows,
+                    source='project-fabric:shared-v1:stock-summary',
+                )
+            except Exception as exc:
+                print(
+                    f"[BOT2-MARKET-SNAPSHOT-WARN] "
+                    f"{type(exc).__name__}: {str(exc)[:180]}"
+                )
+        result = (rows, day, f'{source} | OFF-HOURS')
+        return result if with_source else rows
+
+    # 3) Only when no recent SQLite/Neon snapshot exists do we call ZAPI for
+    # the calendar target day.
     rows, source = load_market(
         target_day,
         force_refresh=False,
