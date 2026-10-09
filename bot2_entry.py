@@ -122,6 +122,211 @@ def rank_text(row):
             else f'Frequency #{row["frequency_rank"]} | Foreign #{row["foreign_rank"]} | OHLC tidak lengkap')
 
 
+def _market_rows_from_payload(payload):
+    if isinstance(payload, list):
+        rows = payload
+    elif isinstance(payload, dict):
+        rows = payload.get('items')
+        if not isinstance(rows, list):
+            rows = payload.get('data')
+    else:
+        rows = None
+
+    if not isinstance(rows, list):
+        raise ValueError('Daftar stock-summary tidak valid.')
+
+    normalized = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        code = str(
+            row.get('StockCode')
+            or row.get('stockCode')
+            or row.get('Code')
+            or row.get('code')
+            or ''
+        ).strip().upper()
+        if not code:
+            continue
+        normalized.append(dict(row, ticker=code))
+
+    if not normalized:
+        raise ValueError('Stock-summary kosong.')
+    return normalized
+
+
+def load_shared_live_market(with_source=False):
+    """Read the common Project Fabric stock-summary snapshot.
+
+    tracker.fetch_stock_summary is cache-first through Neon shared-v1 and only
+    refreshes ZAPI when the shared snapshot is stale or missing.
+    """
+    payload = tracker.fetch_stock_summary(length=5000, start=0)
+    rows = _market_rows_from_payload(payload)
+
+    trade_dates = sorted({
+        str(
+            row.get('Date')
+            or row.get('date')
+            or row.get('TradingDate')
+            or ''
+        )[:10]
+        for row in rows
+        if (
+            row.get('Date')
+            or row.get('date')
+            or row.get('TradingDate')
+        )
+    })
+    day = trade_dates[-1] if trade_dates else datetime.now(ZoneInfo('Asia/Jakarta')).date().isoformat()
+    source = 'PROJECT FABRIC SHARED STOCK-SUMMARY'
+    return (rows, day, source) if with_source else rows
+
+
+def _compact_rupiah(value):
+    value = float(value or 0)
+    sign = '+' if value > 0 else '-' if value < 0 else ''
+    amount = abs(value)
+    if amount >= 1_000_000_000_000:
+        return f'Rp {sign}{amount / 1_000_000_000_000:.2f} T'
+    if amount >= 1_000_000_000:
+        return f'Rp {sign}{amount / 1_000_000_000:.2f} B'
+    if amount >= 1_000_000:
+        return f'Rp {sign}{amount / 1_000_000:.2f} M'
+    if amount >= 1_000:
+        return f'Rp {sign}{amount / 1_000:.2f} K'
+    return f'Rp {sign}{amount:,.0f}'
+
+
+def _limit(value, default=10, maximum=50):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(1, min(maximum, parsed))
+
+
+def _correction_text(row):
+    value = row.get('correction')
+    return f'{value:+.2f}%' if value is not None else 'N/A'
+
+
+def _estimated_note(rows):
+    if any(bool(row.get('estimated')) for row in rows):
+        return (
+            'Catatan: Net Foreign Value diturunkan dari '
+            '(Foreign Buy Shares - Foreign Sell Shares) × Close '
+            'jika stock-summary tidak menyediakan value langsung.'
+        )
+    return None
+
+
+def format_bot2_market_command(kind='MARKET', limit=10, ticker=None):
+    """Expose Bot 2 market ranks as Bot 1 Telegram commands."""
+    try:
+        rows, day, source = load_shared_live_market(with_source=True)
+        market = rank_market(rows)
+    except Exception as exc:
+        detail = str(exc) if type(exc) is ValueError else 'Shared market data gagal; coba lagi.'
+        return '⏳ BOT2 MARKET DATA — DATA BELUM VALID\n' + detail
+
+    if ticker:
+        code = ticker.upper().strip()
+        row = market.get(code)
+        if row is None:
+            return f'❌ {code} tidak ditemukan pada stock-summary {day}.'
+        lines = [
+            f'📊 BOT2 DATA — {code}',
+            f'Data: {day} | {source}',
+            f'Close: {row["close"]:,.0f}' if row.get('close') is not None else 'Close: N/A',
+            f'Koreksi open→close/current: {_correction_text(row)}',
+            f'Frequency: #{row["frequency_rank"]} | {row["frequency"]:,.0f}',
+            f'Net Foreign: #{row["foreign_rank"]} | {_compact_rupiah(row["net"])}',
+            (
+                'Status prefilter: LOLOS ✅'
+                if not reasons_for(row)
+                else 'Status prefilter: BELUM LOLOS ⏳'
+            ),
+        ]
+        reasons = reasons_for(row)
+        if reasons:
+            lines.extend(reasons)
+        note = _estimated_note([row])
+        if note:
+            lines += ['', note]
+        return '\n'.join(lines)
+
+    kind = str(kind or 'MARKET').upper().strip()
+    max_limit = 30 if kind in {'FOREIGN', 'NET_FOREIGN'} else 50
+    shown_limit = _limit(limit, maximum=max_limit)
+
+    values = list(market.values())
+    title = ''
+    if kind in {'FREQ', 'FREQUENCY'}:
+        selected = sorted(
+            [row for row in values if row['frequency'] > 0],
+            key=lambda row: (row['frequency_rank'], row['ticker']),
+        )[:shown_limit]
+        title = f'🔥 TOP FREQUENCY IDX — TOP {shown_limit}'
+    elif kind in {'FOREIGN', 'NET_FOREIGN'}:
+        selected = sorted(
+            [row for row in values if row['net'] > 0],
+            key=lambda row: (row['foreign_rank'], row['ticker']),
+        )[:shown_limit]
+        title = f'🌍 TOP NET FOREIGN BUY VALUE — TOP {shown_limit}'
+    elif kind in {'CORRECTION', 'KOREKSI'}:
+        selected = sorted(
+            [
+                row for row in values
+                if row.get('correction') is not None
+                and -5.000000001 <= row['correction'] <= -0.299999999
+            ],
+            key=lambda row: (row['correction'], row['frequency_rank'], row['ticker']),
+        )[:shown_limit]
+        title = f'📉 HARGA KOREKSI -0,3% s.d. -5% — TOP {shown_limit}'
+    else:
+        selected = sorted(
+            [row for row in values if not reasons_for(row)],
+            key=lambda row: (
+                row['frequency_rank'] + row['foreign_rank'],
+                row['frequency_rank'],
+                row['ticker'],
+            ),
+        )[:shown_limit]
+        title = f'🎯 BOT2 MARKET CONFLUENCE — TOP {shown_limit}'
+
+    lines = [
+        title,
+        f'Data: {day} | {source}',
+        f'Universe: {len(market)} saham',
+        '',
+    ]
+
+    if not selected:
+        lines.append('Belum ada saham yang memenuhi tampilan ini.')
+        return '\n'.join(lines)
+
+    for row in selected:
+        lines.append(
+            f'#{len(lines)-3} {row["ticker"]} | '
+            f'Freq #{row["frequency_rank"]} ({row["frequency"]:,.0f}) | '
+            f'Foreign #{row["foreign_rank"]} ({_compact_rupiah(row["net"])}) | '
+            f'Koreksi {_correction_text(row)} | '
+            f'Close {row["close"]:,.0f}' if row.get('close') is not None
+            else (
+                f'#{len(lines)-3} {row["ticker"]} | '
+                f'Freq #{row["frequency_rank"]} | Foreign #{row["foreign_rank"]} | '
+                f'Koreksi {_correction_text(row)} | Close N/A'
+            )
+        )
+
+    note = _estimated_note(selected)
+    if note:
+        lines += ['', note]
+
+    return '\n'.join(lines)
+
+
 def format_bot2_entry(ticker=None, mode='SWING', force_refresh=False):
     day = tracker.get_safe_end_date(datetime.now(ZoneInfo('Asia/Jakarta')).date().isoformat())
     try:

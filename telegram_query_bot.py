@@ -18,7 +18,7 @@ import requests
 from dotenv import load_dotenv
 
 import tracker
-from bot2_entry import format_bot2_entry
+from bot2_entry import format_bot2_entry, format_bot2_market_command
 from foreign_entry import format_foreign_entry, format_foreign_entry_scan
 from bot_io import split_message, send_message
 from entry_engine import (
@@ -4281,6 +4281,27 @@ ADRO FOREIGN ENTRY BOT2
 FOREIGN ENTRY BOT2 REFRESH
 → Gabungkan Top50 frequency, Top30 foreign dan koreksi open→close -0,3% s.d. -5% dengan seluruh filter FOREIGN ENTRY.
 → Snapshot harian disimpan di database; REFRESH memaksa ambil ulang dari Zapi.
+
+📈 BOT2 MARKET DATA
+TOP FREQ
+TOP FREQ 20
+→ Ranking Frequency dari shared stock-summary.
+
+NET FOREIGN
+TOP FOREIGN 20
+→ Ranking Net Foreign Buy VALUE dari shared stock-summary.
+
+KOREKSI
+KOREKSI 20
+HARGA KOREKSI 20
+→ Saham dengan koreksi open→close/current -0,3% s.d. -5%.
+
+BOT2 MARKET
+BOT2 MARKET 20
+→ Irisan Top50 Frequency + Top30 Net Foreign Buy + zona koreksi.
+
+ADRO BOT2 DATA
+→ Detail Frequency rank, Net Foreign rank, koreksi, close, dan status prefilter satu ticker.
 ADRO FOREIGN ENTRY
 ADRO FOREIGN ENTRY DAYTRADE
 FOREIGN ENTRY
@@ -4808,6 +4829,70 @@ def command_result(text: str, chat_id: str) -> str:
     if first_lower == "scalp":
         return format_scalp_tomorrow_scan()
 
+    # Bot 2 market-data views from the shared Project Fabric stock-summary.
+    if first_lower == "top" and len(parts) >= 2:
+        action = parts[1].strip().upper()
+        limit = next(
+            (
+                int(p)
+                for p in parts[2:]
+                if p.isdigit()
+            ),
+            10,
+        )
+        if action in {"FREQ", "FREQUENCY"}:
+            return format_bot2_market_command("FREQ", limit=limit)
+        if action in {"FOREIGN", "NETFOREIGN", "NET-FOREIGN", "NET_FOREIGN"}:
+            return format_bot2_market_command("FOREIGN", limit=limit)
+
+    if first_lower == "net" and len(parts) >= 2 and parts[1].strip().upper() == "FOREIGN":
+        limit = next(
+            (
+                int(p)
+                for p in parts[2:]
+                if p.isdigit()
+            ),
+            10,
+        )
+        return format_bot2_market_command("FOREIGN", limit=limit)
+
+    if first_lower == "koreksi":
+        limit = next(
+            (
+                int(p)
+                for p in parts[1:]
+                if p.isdigit()
+            ),
+            10,
+        )
+        return format_bot2_market_command("KOREKSI", limit=limit)
+
+    if (
+        first_lower == "harga"
+        and len(parts) >= 2
+        and parts[1].strip().lower() == "koreksi"
+    ):
+        limit = next(
+            (
+                int(p)
+                for p in parts[2:]
+                if p.isdigit()
+            ),
+            10,
+        )
+        return format_bot2_market_command("KOREKSI", limit=limit)
+
+    if first_lower == "bot2" and len(parts) >= 2 and parts[1].strip().upper() == "MARKET":
+        limit = next(
+            (
+                int(p)
+                for p in parts[2:]
+                if p.isdigit()
+            ),
+            10,
+        )
+        return format_bot2_market_command("MARKET", limit=limit)
+
     # Combined foreign + entry checks take precedence over FOREIGN ticker syntax.
     if first_lower == "foreign" and len(parts) >= 2 and parts[1].upper() == "ENTRY":
         mode = "DAYTRADE" if "DAYTRADE" in [p.upper() for p in parts[2:]] else "SWING"
@@ -5015,6 +5100,9 @@ def command_result(text: str, chat_id: str) -> str:
         return format_scalp_tomorrow_ticker(
             ticker
         )
+
+    if "BOT2" in tokens and "DATA" in tokens:
+        return format_bot2_market_command("MARKET", ticker=ticker)
 
     if "FOREIGN" in tokens and "ENTRY" in tokens:
         mode = "DAYTRADE" if "DAYTRADE" in tokens else "SWING"
