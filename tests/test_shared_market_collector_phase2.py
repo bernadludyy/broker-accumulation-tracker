@@ -7,6 +7,24 @@ import tracker
 
 
 class SharedMarketCollectorPhase2Tests(unittest.TestCase):
+    def test_shared_cache_wrapper_is_normalized_for_bot1(self):
+        raw = {
+            "project": "finance:idx:stock-summary",
+            "data": {
+                "timestamp": "2026-10-09T10:00:00Z",
+                "data": [{"StockCode": "TEST", "Close": 100}],
+            },
+        }
+
+        with patch.object(tracker._GATEWAY, "get_or_load", return_value=raw):
+            result = tracker._get_idx(
+                "stock-summary",
+                {"length": 5000, "start": 0},
+            )
+
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result["data"][0]["StockCode"], "TEST")
+
     def test_stock_history_uses_canonical_120_and_trims_locally(self):
         items = [
             {"date": f"2026-10-{day:02d}", "close": day}
