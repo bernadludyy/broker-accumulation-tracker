@@ -4842,7 +4842,7 @@ def command_result(text: str, chat_id: str) -> str:
         )
         if action in {"FREQ", "FREQUENCY"}:
             return format_bot2_market_command("FREQ", limit=limit)
-        if action in {"FOREIGN", "NETFOREIGN", "NET-FORIGN", "NET_FOREIGN"}:
+        if action in {"FOREIGN", "NETFOREIGN", "NET-FOREIGN", "NET_FOREIGN"}:
             return format_bot2_market_command("FOREIGN", limit=limit)
 
     if first_lower == "net" and len(parts) >= 2 and parts[1].strip().upper() == "FOREIGN":
