@@ -314,9 +314,24 @@ def _headers() -> dict:
     return {"x-api-key": API_KEY, "accept": "application/json"}
 
 
+def _unwrap_project_payload(payload):
+    """Normalize shared ZAPI wrapper regardless of which bot populated Neon."""
+    current = payload
+    for _ in range(4):
+        if (
+            isinstance(current, dict)
+            and "project" in current
+            and isinstance(current.get("data"), (dict, list))
+        ):
+            current = current["data"]
+            continue
+        break
+    return current
+
+
 def _get(path: str, params: dict, timeout: int = 30) -> dict:
     path = path.strip().lstrip("/")
-    return _GATEWAY.get_or_load(
+    payload = _GATEWAY.get_or_load(
         endpoint=f"pluang:{path}",
         params=params,
         loader=lambda: get_json(
@@ -327,11 +342,12 @@ def _get(path: str, params: dict, timeout: int = 30) -> dict:
         ),
         policy=market_policy("pluang", path, params),
     )
+    return _unwrap_project_payload(payload)
 
 
 def _get_idx(path: str, params: dict, timeout: int = 30) -> dict:
     path = path.strip().lstrip("/")
-    return _GATEWAY.get_or_load(
+    payload = _GATEWAY.get_or_load(
         endpoint=f"idx:{path}",
         params=params,
         loader=lambda: get_json(
@@ -342,6 +358,7 @@ def _get_idx(path: str, params: dict, timeout: int = 30) -> dict:
         ),
         policy=market_policy("idx", path, params),
     )
+    return _unwrap_project_payload(payload)
 
 
 def fetch_stock_summary(
