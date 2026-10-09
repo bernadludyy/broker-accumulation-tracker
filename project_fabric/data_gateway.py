@@ -27,7 +27,7 @@ class CachePolicy:
 
 _LIVE = CachePolicy()
 _MARKET_POLICIES: dict[tuple[str, str], CachePolicy] = {
-    ("idx", "stock-summary"): CachePolicy(120, 600),
+    ("idx", "stock-summary"): CachePolicy(300, 900),
     ("idx", "stock-history"): CachePolicy(21_600, 86_400),
     ("idx", "foreign-flow"): CachePolicy(120, 600),
     ("idx", "company-announcements"): CachePolicy(21_600, 86_400),
