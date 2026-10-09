@@ -117,10 +117,13 @@ class CombinedTests(unittest.TestCase):
         self.assertIn('Freq #1', text)
 
     def test_market_confluence_and_ticker_view(self):
-        rows = [
-            row('AAAA', Frequency=500, NetForeignValue=5_000_000),
-            row('BBBB', Frequency=300, NetForeignValue=3_000_000),
-        ]
+        a = row('AAAA')
+        a['Frequency'] = 500
+        a['NetForeignValue'] = 5_000_000
+        b_row = row('BBBB')
+        b_row['Frequency'] = 300
+        b_row['NetForeignValue'] = 3_000_000
+        rows = [a, b_row]
         with patch.object(
             b,
             'load_shared_live_market',
