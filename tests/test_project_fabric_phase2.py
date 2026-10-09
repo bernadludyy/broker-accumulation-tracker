@@ -65,8 +65,8 @@ class Phase2GatewayTests(unittest.TestCase):
 
     def test_stock_summary_has_short_bounded_freshness(self):
         policy = market_policy("idx", "stock-summary")
-        self.assertEqual(policy.ttl_seconds, 120)
-        self.assertEqual(policy.stale_if_error_seconds, 600)
+        self.assertEqual(policy.ttl_seconds, 300)
+        self.assertEqual(policy.stale_if_error_seconds, 900)
 
 
 if __name__ == "__main__":
