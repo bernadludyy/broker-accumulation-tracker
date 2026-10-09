@@ -1,4 +1,6 @@
 import unittest
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from unittest.mock import patch
 import bot2_entry as b
 import telegram_query_bot as bot
@@ -95,6 +97,95 @@ class CombinedTests(unittest.TestCase):
              patch.object(b,'evaluate_foreign_entry',return_value=result):
             text=b.format_bot2_entry()
         self.assertIn('Lolos gabungan: 0',text)
+
+    def test_offhours_market_uses_completed_daily_snapshot_without_live_fetch(self):
+        saturday = datetime(
+            2026, 10, 10, 1, 18,
+            tzinfo=ZoneInfo('Asia/Jakarta'),
+        )
+        cached = [row('AAAA'), row('BBBB')]
+
+        with patch.object(
+            b.tracker,
+            'load_stock_summary_snapshot',
+            return_value=cached,
+        ) as load_snapshot, patch.object(
+            b.tracker,
+            'fetch_stock_summary',
+        ) as live_fetch:
+            rows, day, source = b.load_shared_live_market(
+                with_source=True,
+                now=saturday,
+            )
+
+        self.assertEqual(day, '2026-10-09')
+        self.assertEqual(rows, cached)
+        self.assertIn('DAILY DATABASE SNAPSHOT', source)
+        load_snapshot.assert_called_once_with('2026-10-09')
+        live_fetch.assert_not_called()
+
+    def test_offhours_market_backfills_specific_completed_date_when_snapshot_missing(self):
+        saturday = datetime(
+            2026, 10, 10, 1, 18,
+            tzinfo=ZoneInfo('Asia/Jakarta'),
+        )
+        completed = [row('AAAA'), row('BBBB')]
+
+        with patch.object(
+            b.tracker,
+            'load_stock_summary_snapshot',
+            return_value=None,
+        ), patch.object(
+            b,
+            'load_market',
+            return_value=(completed, 'ZAPI FRESH + TERSIMPAN'),
+        ) as load_market, patch.object(
+            b.tracker,
+            'fetch_stock_summary',
+        ) as live_fetch:
+            rows, day, source = b.load_shared_live_market(
+                with_source=True,
+                now=saturday,
+            )
+
+        self.assertEqual(day, '2026-10-09')
+        self.assertEqual(rows, completed)
+        self.assertIn('OFF-HOURS 2026-10-09', source)
+        load_market.assert_called_once_with(
+            '2026-10-09',
+            force_refresh=False,
+            with_source=True,
+        )
+        live_fetch.assert_not_called()
+
+    def test_trading_day_still_uses_shared_live_stock_summary(self):
+        friday = datetime(
+            2026, 10, 9, 10, 5,
+            tzinfo=ZoneInfo('Asia/Jakarta'),
+        )
+        live_rows = [
+            dict(row('AAAA'), Date='2026-10-09'),
+            dict(row('BBBB'), Date='2026-10-09'),
+        ]
+
+        with patch.object(
+            b.tracker,
+            'fetch_stock_summary',
+            return_value={'data': live_rows},
+        ) as live_fetch, patch.object(
+            b.tracker,
+            'load_stock_summary_snapshot',
+        ) as load_snapshot:
+            rows, day, source = b.load_shared_live_market(
+                with_source=True,
+                now=friday,
+            )
+
+        self.assertEqual(day, '2026-10-09')
+        self.assertEqual(len(rows), 2)
+        self.assertIn('SHARED LIVE', source)
+        live_fetch.assert_called_once_with(length=5000, start=0)
+        load_snapshot.assert_not_called()
 
     def test_shared_market_views_use_shared_stock_summary(self):
         a = row('AAAA')
