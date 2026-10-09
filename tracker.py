@@ -263,6 +263,25 @@ def save_stock_summary_snapshot(
     return len(prepared)
 
 
+def latest_stock_summary_snapshot_date(
+    db_path: str = DB_PATH,
+) -> str | None:
+    """Return the newest complete persisted stock-summary trading date."""
+    init_db(db_path)
+    con = get_connection(db_path)
+    try:
+        row = con.execute(
+            """
+            SELECT MAX(trade_date)
+            FROM stock_summary_snapshots
+            WHERE row_count > 0
+            """
+        ).fetchone()
+        return str(row[0]) if row and row[0] else None
+    finally:
+        con.close()
+
+
 def load_stock_summary_snapshot(
     trade_date: str,
     db_path: str = DB_PATH,
