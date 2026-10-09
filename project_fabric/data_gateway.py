@@ -58,6 +58,11 @@ def market_policy(
     key = (family.strip().lower(), endpoint.strip().lstrip("/").lower())
     request_params = params or {}
 
+    if key == ("idx", "stock-summary"):
+        if _is_historical_iso_date(request_params.get("date")):
+            return CachePolicy(21_600, 86_400)
+        return CachePolicy(300, 900)
+
     if key == ("idx", "foreign-flow"):
         if _is_historical_iso_date(request_params.get("date")):
             return CachePolicy(21_600, 86_400)
