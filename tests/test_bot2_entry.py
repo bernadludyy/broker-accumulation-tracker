@@ -97,10 +97,13 @@ class CombinedTests(unittest.TestCase):
         self.assertIn('Lolos gabungan: 0',text)
 
     def test_shared_market_views_use_shared_stock_summary(self):
-        rows = [
-            row('AAAA', Frequency=500, NetForeignValue=5_000_000),
-            row('BBBB', Frequency=300, NetForeignValue=3_000_000),
-        ]
+        a = row('AAAA')
+        a['Frequency'] = 500
+        a['NetForeignValue'] = 5_000_000
+        b_row = row('BBBB')
+        b_row['Frequency'] = 300
+        b_row['NetForeignValue'] = 3_000_000
+        rows = [a, b_row]
         with patch.object(
             b.tracker,
             'fetch_stock_summary',
