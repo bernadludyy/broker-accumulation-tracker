@@ -82,7 +82,12 @@ def evaluate_universe(ticker: str, *, market_row: dict | None = None,
         # Historical Bot 2 snapshots often outlive the 15-minute live Neon index.
         # Label source as dated market snapshot, never as live broker activity.
         flow = institutional_flow(market_row)
-        items["institutional_flow"] = flow
+        # Never downgrade actual foreign monetary values previously stored in
+        # completed stock-history to a share-times-close estimate in summary.
+        previous = items.get("institutional_flow") or {}
+        if (flow.get("source") == "reported_foreign_value"
+                or previous.get("source") != "reported_foreign_value"):
+            items["institutional_flow"] = flow
     elif not payload.get("summary_observed_at"):
         items["institutional_flow"] = {"score": None, "status": "UNAVAILABLE"}
     elif not _date_is_recent(str(payload.get("summary_observed_at"))[:10], as_of, 8 if payload.get("archived") else 1):
