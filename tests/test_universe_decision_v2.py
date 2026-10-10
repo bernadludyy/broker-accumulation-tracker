@@ -117,5 +117,24 @@ class UniverseDecisionV2Tests(unittest.TestCase):
         self.assertIn("BELUM ADA DATA", report)
 
 
+    def test_archive_actual_foreign_is_not_downgraded_to_shares_estimate(self):
+        archived = cached_signals()
+        archived["archived"] = True
+        archived["summary_observed_at"] = "2026-10-09"
+        with patch("universe_decision.tracker.peek_universe_intelligence",
+                   return_value=archived):
+            intel = evaluate_universe(
+                "ABCD",
+                as_of="2026-10-10",
+                market_row={"Close":100, "Value":1000000,
+                            "ForeignBuy":1000, "ForeignSell":300},
+            )
+        self.assertEqual(intel["coverage"], 5)
+        self.assertEqual(
+            intel["items"]["institutional_flow"]["source"],
+            "reported_foreign_value",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
