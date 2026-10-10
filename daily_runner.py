@@ -21,6 +21,7 @@ BASE_DIR = Path(__file__).resolve().parent
 os.chdir(BASE_DIR)
 
 import tracker
+from universe_decision import evaluate_universe, priority_score
 from project_fabric.observability import ObservabilityClient
 
 _OBS = ObservabilityClient("broker-accumulation-tracker")
@@ -811,6 +812,37 @@ def build_dashboard_result(
             "add_dominant_broker_daily_action() "
             "belum ditemukan. Daily broker action dilewati."
         )
+
+    # Add cache-only Universe evidence to the daily CSV for future scoring
+    # calibration. Keep existing Telegram ordering, gates and output unchanged.
+    if "ticker" in dashboard.columns and not dashboard.empty:
+        dashboard = dashboard.copy()
+        intel_by_ticker = {}
+        for code in dashboard["ticker"].dropna().astype(str).str.upper().unique():
+            intel_by_ticker[code] = evaluate_universe(code, as_of=safe_end_date)
+        dashboard["universe_score"] = dashboard["ticker"].map(
+            lambda t: intel_by_ticker.get(str(t).upper(), {}).get("score")
+        )
+        dashboard["universe_coverage"] = dashboard["ticker"].map(
+            lambda t: intel_by_ticker.get(str(t).upper(), {}).get("coverage", 0)
+        )
+        dashboard["universe_decision"] = dashboard["ticker"].map(
+            lambda t: intel_by_ticker.get(str(t).upper(), {}).get("decision", "DATA TERBATAS")
+        )
+        dashboard["universe_distribution_risk"] = dashboard["ticker"].map(
+            lambda t: intel_by_ticker.get(str(t).upper(), {}).get("distribution_score")
+        )
+        if "final_score" in dashboard.columns:
+            dashboard["smart_priority"] = dashboard.apply(
+                lambda row: (
+                    priority_score(
+                        row["final_score"],
+                        intel_by_ticker.get(str(row["ticker"]).upper(), {}),
+                    )
+                    if pd.notna(row["final_score"]) else None
+                ),
+                axis=1,
+            )
 
     return dashboard
 

@@ -10,6 +10,7 @@ import pandas as pd
 
 import tracker
 from entry_engine import build_entry_score, load_stock_history
+from universe_decision import evaluate_universe, priority_score, summary_line
 
 
 def _number(row, *keys):
@@ -66,7 +67,7 @@ def _threshold():
     return value
 
 
-def evaluate_foreign_entry(ticker: str, mode: str = 'SWING', *, as_of: str | None = None) -> dict:
+def evaluate_foreign_entry(ticker: str, mode: str = 'SWING', *, as_of: str | None = None, market_row: dict | None = None) -> dict:
     ticker, mode = ticker.strip().upper(), mode.strip().upper()
     if mode not in {'SWING', 'DAYTRADE'}:
         raise ValueError('Mode harus SWING atau DAYTRADE.')
@@ -109,6 +110,11 @@ def evaluate_foreign_entry(ticker: str, mode: str = 'SWING', *, as_of: str | Non
     if not math.isfinite(entry['atr14']) or entry['atr14'] <= 0:
         result['reasons'].append('ATR tidak valid atau nol.')
     result['passed'] = not result['reasons']
+    # Soft ranking only: missing or historical Universe signals do not defeat
+    # the verified five-day foreign, entry-plan or risk/reward hard gates.
+    intelligence = evaluate_universe(ticker, market_row=market_row, as_of=safe_date)
+    result['universe'] = intelligence
+    result['priority_score'] = priority_score(entry['score'], intelligence)
     return result
 
 
@@ -130,6 +136,12 @@ def format_result(result: dict) -> str:
     if entry:
         lines += [f'Skor entry: {entry["score"]}/100 | Filter: {entry["filter_status"]}',
                   f'R:R TP1: {entry["selected_rr"]:.2f} | Harga penutupan: {entry["close"]:,.0f}']
+    if result.get('universe'):
+        lines.append(summary_line(result['universe']))
+        if entry:
+            lines.append(f'Prioritas gabungan: {result["priority_score"]:.1f}/100 (bukan win rate)')
+        if result['universe']['risk_high']:
+            lines.append('⚠️ Perhatikan risiko distribusi; kelulusan filter dasar bukan rekomendasi beli.')
     if result['passed']:
         if entry['selected_plan'] == 'BREAKOUT':
             lines += [f'Rencana: BREAKOUT | Trigger > {entry["breakout_entry"]:,.2f}',
@@ -164,7 +176,7 @@ def format_foreign_entry_scan(tickers, mode: str = 'SWING') -> str:
         except Exception:
             # Never expose token-bearing URLs/provider details to Telegram.
             failed.append(ticker)
-    passed.sort(key=lambda r: r['entry']['score'], reverse=True)
+    passed.sort(key=lambda r: (-r.get('priority_score', r['entry']['score']), r['ticker']))
     lines = [f'🌍 FOREIGN ENTRY — WATCHLIST {mode}',
              f'Diperiksa: {len(tickers)} | Lolos: {len(passed)} | Belum lolos: {rejected} | Error: {len(failed)}']
     if not tickers:
