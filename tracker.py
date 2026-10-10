@@ -16,6 +16,7 @@ import requests
 from dotenv import load_dotenv
 from bot_io import get_json, send_message
 from project_fabric.data_gateway import DataGateway, market_policy
+from project_fabric.universe_intelligence import read_ticker as read_universe_intelligence
 
 load_dotenv()
 
@@ -28,6 +29,15 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 _GATEWAY = DataGateway(service="broker-accumulation-tracker")
+
+def peek_universe_intelligence(ticker: str) -> dict:
+    """Read five shared Universe scores from Neon; never triggers ZAPI.
+
+    Kept separate from entry gates and Telegram output until signal quality
+    is validated against actual Bot 1 / Bot 2 outcomes.
+    """
+    return read_universe_intelligence(_GATEWAY.cache, ticker)
+
 
 
 def get_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
