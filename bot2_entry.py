@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 import math
 import tracker
 from foreign_entry import _number, evaluate_foreign_entry, format_result
+from universe_decision import evaluate_universe, priority_score, summary_line
 
 
 def load_market(day, force_refresh=False, with_source=False):
@@ -376,6 +377,8 @@ def format_bot2_market_command(kind='MARKET', limit=10, ticker=None):
         detail = str(exc) if type(exc) is ValueError else 'Shared market data gagal; coba lagi.'
         return '⏳ BOT2 MARKET DATA — DATA BELUM VALID\n' + detail
 
+    raw_by_ticker = {str(r.get('ticker') or r.get('StockCode') or r.get('stockCode') or '').strip().upper(): r
+                     for r in rows if isinstance(r, dict)}
     if ticker:
         code = ticker.upper().strip()
         row = market.get(code)
@@ -407,10 +410,12 @@ def format_bot2_market_command(kind='MARKET', limit=10, ticker=None):
         note = _estimated_note([row])
         if note:
             lines += ['', note]
+        intel = evaluate_universe(code, market_row=raw_by_ticker.get(code), as_of=day)
+        lines += ['', summary_line(intel), 'Analisis tambahan tidak mengubah syarat Top Frequency/Foreign/Koreksi.']
         return '\n'.join(lines)
 
     kind = str(kind or 'MARKET').upper().strip()
-    max_limit = 30 if kind in {'FOREIGN', 'NET_FOREIGN'} else 50
+    max_limit = 30 if kind in {'FOREIGN', 'NET_FOREIGN'} else (20 if kind == 'SMART' else 50)
     shown_limit = _limit(limit, maximum=max_limit)
 
     values = list(market.values())
@@ -427,6 +432,31 @@ def format_bot2_market_command(kind='MARKET', limit=10, ticker=None):
             key=lambda row: (row['foreign_rank'], row['ticker']),
         )[:shown_limit]
         title = f'🌍 TOP NET FOREIGN BUY VALUE — TOP {shown_limit}'
+    elif kind == 'SMART':
+        # Do not expand the existing candidate universe or trigger another ZAPI
+        # request. Up to 30 prefiler-valid candidates are ranked cache-only.
+        eligible = sorted(
+            [row for row in values if not reasons_for(row)],
+            key=lambda row: (row['frequency_rank'] + row['foreign_rank'],
+                             row['ticker']),
+        )[:30]
+        evaluated = []
+        for row in eligible:
+            intel = evaluate_universe(row['ticker'],
+                                      market_row=raw_by_ticker.get(row['ticker']),
+                                      as_of=day)
+            market_priority = max(0.0, 100.0 - 0.75 * (row['frequency_rank'] - 1)
+                                  - 1.25 * (row['foreign_rank'] - 1))
+            enriched = dict(row, universe_intelligence=intel,
+                            smart_priority=priority_score(market_priority, intel))
+            evaluated.append(enriched)
+        selected = sorted(
+            evaluated,
+            key=lambda row: (-row['smart_priority'],
+                             row['frequency_rank'] + row['foreign_rank'],
+                             row['ticker']),
+        )[:shown_limit]
+        title = f'🧠 BOT2 SMART RANKING — TOP {shown_limit}'
     elif kind in {'CORRECTION', 'KOREKSI'}:
         selected = sorted(
             [
@@ -471,8 +501,11 @@ def format_bot2_market_command(kind='MARKET', limit=10, ticker=None):
             f'→ Freq : #{row["frequency_rank"]} ({row["frequency"]:,.0f})',
             f'→ Net Foreign : #{row["foreign_rank"]} ({_foreign_value_text(row)})',
             f'→ Koreksi : {_correction_text(row)} (Close {close_text})',
-            '',
         ])
+        if kind == 'SMART':
+            lines += [f'→ Smart Priority: {row["smart_priority"]:.1f}/100',
+                      f'→ {summary_line(row["universe_intelligence"])}']
+        lines.append('')
 
     note = _estimated_note(selected)
     if note:
@@ -499,6 +532,8 @@ def format_bot2_entry(ticker=None, mode='SWING', force_refresh=False):
               'Top 50 frequency ∩ Top 30 foreign ∩ koreksi open→close -0,3% s.d. -5%.']
     if any(row['estimated'] for row in market.values()):
         header += ['Ranking foreign mencakup estimasi (net shares × close); konfirmasi foreign 5D tetap wajib nilai aktual.']
+    raw_by_ticker = {str(r.get('ticker') or r.get('StockCode') or '').strip().upper(): r
+                     for r in market_rows if isinstance(r, dict)}
     targets = [ticker.upper()] if ticker else [code for code, row in market.items() if not reasons_for(row)]
     passed, failed, rejected = [], [], 0
     for code in targets:
@@ -507,7 +542,7 @@ def format_bot2_entry(ticker=None, mode='SWING', force_refresh=False):
         if reasons:
             return '\n'.join(header + [f'⏳ {code} BELUM LOLOS', *reasons] + ([rank_text(row)] if row else []))
         try:
-            result = evaluate_foreign_entry(code, mode, as_of=day)
+            result = evaluate_foreign_entry(code, mode, as_of=day, market_row=raw_by_ticker.get(code))
             # Price snapshots must agree as well as dates.
             if result['entry'] and not math.isclose(result['entry']['close'],row['close'],abs_tol=1e-8,rel_tol=1e-8):
                 result['passed'] = False
@@ -520,7 +555,8 @@ def format_bot2_entry(ticker=None, mode='SWING', force_refresh=False):
                 rejected += 1
         except Exception:
             failed.append(code)
-    passed.sort(key=lambda item:(-item[1]['entry']['score'],item[0]['ticker']))
+    passed.sort(key=lambda item: (-item[1].get('priority_score', item[1]['entry']['score']),
+                                  item[0]['ticker']))
     header += [f'Lolos Bot2: {len(targets)} | Lolos gabungan: {len(passed)} | Belum lolos entry: {rejected} | Error: {len(failed)}']
     for row,result in passed[:10]:
         header += ['',rank_text(row),format_result(result)]
