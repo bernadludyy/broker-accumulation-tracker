@@ -67,7 +67,7 @@ def _threshold():
     return value
 
 
-def evaluate_foreign_entry(ticker: str, mode: str = 'SWING', *, as_of: str | None = None) -> dict:
+def evaluate_foreign_entry(ticker: str, mode: str = 'SWING', *, as_of: str | None = None, market_row: dict | None = None) -> dict:
     ticker, mode = ticker.strip().upper(), mode.strip().upper()
     if mode not in {'SWING', 'DAYTRADE'}:
         raise ValueError('Mode harus SWING atau DAYTRADE.')
@@ -112,7 +112,7 @@ def evaluate_foreign_entry(ticker: str, mode: str = 'SWING', *, as_of: str | Non
     result['passed'] = not result['reasons']
     # Soft ranking only: missing or historical Universe signals do not defeat
     # the verified five-day foreign, entry-plan or risk/reward hard gates.
-    intelligence = evaluate_universe(ticker, as_of=safe_date)
+    intelligence = evaluate_universe(ticker, market_row=market_row, as_of=safe_date)
     result['universe'] = intelligence
     result['priority_score'] = priority_score(entry['score'], intelligence)
     return result
