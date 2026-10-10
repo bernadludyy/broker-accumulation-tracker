@@ -55,7 +55,8 @@ def ensure_universe_intelligence(ticker: str, allow_one_fetch: bool = False) -> 
         return peek_universe_intelligence(ticker)
     try:
         from datetime import date, timedelta
-        recent_cutoff = datetime.now().astimezone().date() - timedelta(days=8)
+        from zoneinfo import ZoneInfo
+        recent_cutoff = datetime.now(ZoneInfo("Asia/Jakarta")).date() - timedelta(days=8)
         archived = _ARCHIVE.latest_score(ticker)
         if archived and archived.get("history_last_date") and date.fromisoformat(archived["history_last_date"]) >= recent_cutoff:
             return archived
@@ -64,9 +65,7 @@ def ensure_universe_intelligence(ticker: str, allow_one_fetch: bool = False) -> 
             return _ARCHIVE.latest_score(ticker) or {}
         if not allow_one_fetch:
             return _ARCHIVE.latest_score(ticker) or peek_universe_intelligence(ticker)
-        payload = fetch_stock_history(ticker, length=120)
-        _ARCHIVE.save_history(ticker, payload)
-        _ARCHIVE.compute_score(ticker)
+        fetch_stock_history(ticker, length=120)
         return _ARCHIVE.latest_score(ticker) or peek_universe_intelligence(ticker)
     except Exception as exc:
         print(f"[MARKET-ARCHIVE-WARN] ensure {ticker}: {type(exc).__name__}")
@@ -456,10 +455,16 @@ def fetch_stock_summary(
     if code:
         params["code"] = code.upper().strip()
 
-    return _get_idx(
+    payload = _get_idx(
         "stock-summary",
         params,
     )
+    if _ARCHIVE.ready:
+        try:
+            _ARCHIVE.save_summary(payload)
+        except Exception as exc:
+            print(f"[MARKET-ARCHIVE-WARN] summary: {type(exc).__name__}")
+    return payload
 
 CANONICAL_STOCK_HISTORY_LENGTH = 120
 
