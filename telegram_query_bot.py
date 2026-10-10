@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 
 import tracker
 from bot2_entry import format_bot2_entry, format_bot2_market_command
+from universe_decision import evaluate_universe, format_universe_report, summary_line
 from foreign_entry import format_foreign_entry, format_foreign_entry_scan
 from bot_io import split_message, send_message
 from entry_engine import (
@@ -4273,7 +4274,48 @@ def format_status(ticker: str) -> str:
     )
 
 
+def format_bot1_smart(ticker: str) -> str:
+    """Compact broker evidence + cached Universe risk, with no new ZAPI calls."""
+    code = normalize_ticker(ticker)
+    five, _ = aggregate_period(code, "5D")
+    twenty, _ = aggregate_period(code, "20D")
+    info = evaluate_universe(code, as_of=five.end_date if five else None)
+    lines = [f"🏦 BOT1 SMART — {code}",
+             summary_line(info),
+             f"History Universe: {info['history_date'] or 'N/A'}"]
+    if not five:
+        lines += ["Broker 5D: BELUM ADA DATA DI DATABASE",
+                  f"Gunakan /add {code} untuk mengisi histori dahulu."]
+    else:
+        lines.extend([
+            f"Broker 5D: {five.flow} | {five.trading_days} sesi",
+            f"Net broker terlihat: {format_rp(five.net_value, signed=True)}",
+            f"Net Lot: {format_int(five.net_lots, signed=True)}",
+        ])
+    if twenty:
+        lines.append(f"Net broker 20D: {format_rp(twenty.net_value, signed=True)}")
+    if info["risk_high"]:
+        lines.append("⚠️ Risiko distribusi pada candle historis meningkat.")
+    elif info["score"] is not None and five and five.net_value > 0:
+        lines.append("📊 Ada dukungan dari aktivitas broker terlihat; cek entry terpisah.")
+    lines += ["Data broker adalah transaksi broker TERLIHAT, bukan kepemilikan bandar.",
+              "Prioritas Universe belum menggantikan filter entry; gunakan "
+              + code + " FOREIGN ENTRY."]
+    return "\n".join(lines)
+
+
 HELP_TEXT = """🤖 BROKER QUERY BOT — COMMAND LIST
+
+🧠 UNIVERSE SMART V2 (cache Neon, tanpa ZAPI tambahan)
+BOT1 SMART ADRO
+→ Net broker 5D/20D + penilaian dan risiko Universe.
+BOT2 SMART
+BOT2 SMART 10
+→ Ranking kualitas dari saham yang SUDAH lolos prefilter BOT2 MARKET.
+UNIVERSE ADRO
+/intel ADRO
+→ Detail lima indikator untuk satu ticker (gunakan /intel ADRO).
+→ Data historis/tidak tersedia diberi label N/A, bukan skor nol.
 
 🌍 FOREIGN + ENTRY
 FOREIGN ENTRY BOT2
@@ -4682,6 +4724,21 @@ def command_result(text: str, chat_id: str) -> str:
     if first_lower in {"/start", "/help", "help"}:
         return HELP_TEXT
 
+    if first_lower in {"/intel", "intel", "universe"}:
+        if len(parts) < 2:
+            return "Format: /intel TICKER (contoh: /intel ADRO)"
+        return format_universe_report(normalize_ticker(parts[1]))
+
+    if first_lower in {"/bot1smart", "bot1smart"}:
+        if len(parts) < 2:
+            return "Format: BOT1 SMART TICKER"
+        return format_bot1_smart(parts[1])
+
+    if first_lower == "bot1" and len(parts) >= 2 and parts[1].upper() == "SMART":
+        if len(parts) < 3:
+            return "Format: BOT1 SMART TICKER"
+        return format_bot1_smart(parts[2])
+
     if first_lower == "/list":
         tickers = load_watchlist()
         if not tickers:
@@ -4881,6 +4938,10 @@ def command_result(text: str, chat_id: str) -> str:
             10,
         )
         return format_bot2_market_command("KOREKSI", limit=limit)
+
+    if first_lower in {"bot2", "/bot2"} and len(parts) >= 2 and parts[1].strip().upper() == "SMART":
+        limit = next((int(p) for p in parts[2:] if p.isdigit()), 10)
+        return format_bot2_market_command("SMART", limit=limit)
 
     if first_lower == "bot2" and len(parts) >= 2 and parts[1].strip().upper() == "MARKET":
         limit = next(
@@ -5100,6 +5161,12 @@ def command_result(text: str, chat_id: str) -> str:
         return format_scalp_tomorrow_ticker(
             ticker
         )
+
+    if "INTEL" in tokens or "UNIVERSE" in tokens:
+        return format_universe_report(ticker)
+
+    if "BOT1" in tokens and "SMART" in tokens:
+        return format_bot1_smart(ticker)
 
     if "BOT2" in tokens and "DATA" in tokens:
         return format_bot2_market_command("MARKET", ticker=ticker)
