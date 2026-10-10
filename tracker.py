@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from bot_io import get_json, send_message
 from project_fabric.data_gateway import DataGateway, market_policy
 from project_fabric.universe_intelligence import read_ticker as read_universe_intelligence
+from project_fabric.market_archive import MarketArchive
 
 load_dotenv()
 
@@ -29,6 +30,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 _GATEWAY = DataGateway(service="broker-accumulation-tracker")
+_ARCHIVE = MarketArchive(service="broker-accumulation-tracker")
 
 def peek_universe_intelligence(ticker: str) -> dict:
     """Read five shared Universe scores from Neon; never triggers ZAPI.
@@ -36,7 +38,39 @@ def peek_universe_intelligence(ticker: str) -> dict:
     Kept separate from entry gates and Telegram output until signal quality
     is validated against actual Bot 1 / Bot 2 outcomes.
     """
+    if _ARCHIVE.ready:
+        try:
+            archived = _ARCHIVE.latest_score(ticker)
+            if archived:
+                return archived
+        except Exception as exc:
+            print(f"[MARKET-ARCHIVE-WARN] read {ticker}: {type(exc).__name__}")
     return read_universe_intelligence(_GATEWAY.cache, ticker)
+
+
+def ensure_universe_intelligence(ticker: str, allow_one_fetch: bool = False) -> dict:
+    """Explicit ticker drill-down can fill one missing history; no broad scan."""
+    ticker = ticker.strip().upper()
+    if not _ARCHIVE.ready:
+        return peek_universe_intelligence(ticker)
+    try:
+        from datetime import date, timedelta
+        recent_cutoff = datetime.now().astimezone().date() - timedelta(days=8)
+        archived = _ARCHIVE.latest_score(ticker)
+        if archived and archived.get("history_last_date") and date.fromisoformat(archived["history_last_date"]) >= recent_cutoff:
+            return archived
+        computed = _ARCHIVE.compute_score(ticker)
+        if computed and date.fromisoformat(computed["history_last_date"]) >= recent_cutoff:
+            return _ARCHIVE.latest_score(ticker) or {}
+        if not allow_one_fetch:
+            return _ARCHIVE.latest_score(ticker) or peek_universe_intelligence(ticker)
+        payload = fetch_stock_history(ticker, length=120)
+        _ARCHIVE.save_history(ticker, payload)
+        _ARCHIVE.compute_score(ticker)
+        return _ARCHIVE.latest_score(ticker) or peek_universe_intelligence(ticker)
+    except Exception as exc:
+        print(f"[MARKET-ARCHIVE-WARN] ensure {ticker}: {type(exc).__name__}")
+        return peek_universe_intelligence(ticker)
 
 
 
@@ -477,6 +511,13 @@ def fetch_stock_history(
         },
     )
 
+    if _ARCHIVE.ready and upstream_length >= 30:
+        try:
+            stored = _ARCHIVE.save_history(ticker, payload)
+            if stored:
+                _ARCHIVE.compute_score(ticker)
+        except Exception as exc:
+            print(f"[MARKET-ARCHIVE-WARN] history {ticker}: {type(exc).__name__}")
     if requested >= upstream_length:
         return payload
     return _trim_stock_history_payload(payload, requested)
