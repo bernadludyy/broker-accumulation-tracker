@@ -85,7 +85,7 @@ def evaluate_universe(ticker: str, *, market_row: dict | None = None,
         items["institutional_flow"] = flow
     elif not payload.get("summary_observed_at"):
         items["institutional_flow"] = {"score": None, "status": "UNAVAILABLE"}
-    elif not _date_is_recent(str(payload.get("summary_observed_at"))[:10], as_of, 1):
+    elif not _date_is_recent(str(payload.get("summary_observed_at"))[:10], as_of, 8 if payload.get("archived") else 1):
         items["institutional_flow"] = {"score": None, "status": "STALE_OR_MISSING"}
 
     numbers = {}
@@ -120,7 +120,8 @@ def evaluate_universe(ticker: str, *, market_row: dict | None = None,
         "decision": decision,
         "coverage": coverage,
         "history_date": history_date if _date_is_recent(history_date, as_of) else None,
-        "data_source": "cached-market-snapshot" if market_row is not None else "neon-cache",
+        "data_source": ("cached-market-snapshot" if market_row is not None else
+                        "neon-market-warehouse" if payload.get("archived") else "neon-cache"),
         "risk_high": risk_high,
         "distribution_score": distribution,
         "items": items,
@@ -156,10 +157,17 @@ def summary_line(intelligence: dict) -> str:
 
 
 def format_universe_report(ticker: str) -> str:
+    # Only explicit /intel query may use at most one cache-first upstream
+    # stock-history request when the permanent archive lacks this ticker.
+    try:
+        tracker.ensure_universe_intelligence(ticker, allow_one_fetch=True)
+    except Exception as exc:
+        print(f"[UNIVERSE-REPORT-WARN] {type(exc).__name__}")
     info = evaluate_universe(ticker)
     out = [f"🧠 UNIVERSE INTELLIGENCE — {info['ticker']}",
            summary_line(info),
            f"History terakhir: {info['history_date'] or 'tidak tersedia/terlalu lama'}",
+           f"Sumber: {info['data_source']} (historis, bukan harga live)",
            ""]
     for key, label in LABELS.items():
         item = info["items"].get(key, {})

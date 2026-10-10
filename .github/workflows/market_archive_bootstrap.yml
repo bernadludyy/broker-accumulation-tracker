@@ -1,0 +1,35 @@
+name: Neon Market Warehouse Bootstrap
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/archive_backfill_once.py
+      - .github/workflows/market_archive_bootstrap.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: neon-market-archive-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      PROJECT_FABRIC_DATABASE_URL: ${{ secrets.PROJECT_FABRIC_DATABASE_URL }}
+      PROJECT_FABRIC_CACHE_NAMESPACE: shared-v1
+      PROJECT_FABRIC_DB_REQUIRED: "true"
+      ZPI_API_KEY: ${{ secrets.ZPI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements_github.txt
+      - name: Bootstrap saved sessions and ADRO indicator scores
+        run: python scripts/archive_backfill_once.py --ticker ADRO
