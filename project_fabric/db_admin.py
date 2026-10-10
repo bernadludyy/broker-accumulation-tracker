@@ -5,6 +5,7 @@ import json
 import os
 
 from .postgres_backend import PostgresTTLCache, configured_database_url
+from .market_archive import MarketArchive
 
 
 def main() -> int:
@@ -33,6 +34,7 @@ def main() -> int:
     )
     if args.command == "migrate":
         cache.migrate()
+        MarketArchive(database_url=url, service="db-admin").migrate()
 
     status = cache.health_check()
     print(json.dumps({
