@@ -135,7 +135,7 @@ class CombinedTests(unittest.TestCase):
         load_snapshot.assert_called_once_with('2026-10-09')
         live_fetch.assert_not_called()
 
-    def test_offhours_market_reuses_stale_neon_full_market_before_zapi(self):
+    def test_offhours_market_prefers_exact_completed_day_over_stale_neon(self):
         saturday = datetime(
             2026, 10, 10, 1, 18,
             tzinfo=ZoneInfo('Asia/Jakarta'),
@@ -143,6 +143,10 @@ class CombinedTests(unittest.TestCase):
         shared_rows = [
             dict(row('AAAA'), Date='2026-10-08'),
             dict(row('BBBB'), Date='2026-10-08'),
+        ]
+        exact_rows = [
+            dict(row('AAAA'), Date='2026-10-09'),
+            dict(row('BBBB'), Date='2026-10-09'),
         ]
 
         with patch.object(
@@ -159,17 +163,22 @@ class CombinedTests(unittest.TestCase):
         ) as save_snapshot, patch.object(
             b,
             'load_market',
+            return_value=(exact_rows, 'ZAPI FRESH + TERSIMPAN'),
         ) as load_market:
             rows, day, source = b.load_shared_live_market(
                 with_source=True,
                 now=saturday,
             )
 
-        self.assertEqual(day, '2026-10-08')
-        self.assertEqual(rows, shared_rows)
-        self.assertIn('NEON SHARED LAST MARKET SNAPSHOT', source)
-        save_snapshot.assert_called_once()
-        load_market.assert_not_called()
+        self.assertEqual(day, '2026-10-09')
+        self.assertEqual(rows, exact_rows)
+        self.assertIn('OFF-HOURS 2026-10-09', source)
+        save_snapshot.assert_not_called()
+        load_market.assert_called_once_with(
+            '2026-10-09',
+            force_refresh=False,
+            with_source=True,
+        )
 
     def test_offhours_market_calls_historical_zapi_only_when_no_recent_cache_exists(self):
         saturday = datetime(
@@ -208,9 +217,9 @@ class CombinedTests(unittest.TestCase):
             with_source=True,
         )
 
-    def test_trading_day_still_uses_shared_live_stock_summary(self):
-        friday = datetime(
-            2026, 10, 9, 10, 5,
+    def test_trading_day_labels_active_session_even_if_row_date_is_previous_eod(self):
+        monday = datetime(
+            2026, 10, 12, 10, 5,
             tzinfo=ZoneInfo('Asia/Jakarta'),
         )
         live_rows = [
@@ -228,14 +237,96 @@ class CombinedTests(unittest.TestCase):
         ) as load_snapshot:
             rows, day, source = b.load_shared_live_market(
                 with_source=True,
-                now=friday,
+                now=monday,
             )
 
-        self.assertEqual(day, '2026-10-09')
+        self.assertEqual(day, '2026-10-12')
         self.assertEqual(len(rows), 2)
         self.assertIn('SHARED LIVE', source)
         live_fetch.assert_called_once_with(length=5000, start=0)
         load_snapshot.assert_not_called()
+
+    def test_monday_after_close_fetches_exact_today_before_friday_cache(self):
+        monday = datetime(
+            2026, 10, 12, 18, 10,
+            tzinfo=ZoneInfo('Asia/Jakarta'),
+        )
+        friday_rows = [
+            dict(row('AAAA'), Date='2026-10-09'),
+            dict(row('BBBB'), Date='2026-10-09'),
+        ]
+        monday_rows = [
+            dict(row('AAAA'), Date='2026-10-12'),
+            dict(row('BBBB'), Date='2026-10-12'),
+        ]
+
+        with patch.object(
+            b.tracker,
+            'latest_stock_summary_snapshot_date',
+            return_value='2026-10-09',
+        ), patch.object(
+            b.tracker,
+            'load_stock_summary_snapshot',
+            return_value=friday_rows,
+        ), patch.object(
+            b.tracker,
+            'peek_shared_stock_summary',
+            return_value={'data': friday_rows},
+        ), patch.object(
+            b,
+            'load_market',
+            return_value=(monday_rows, 'ZAPI FRESH + TERSIMPAN'),
+        ) as load_market:
+            rows, day, source = b.load_shared_live_market(
+                with_source=True,
+                now=monday,
+            )
+
+        self.assertEqual(day, '2026-10-12')
+        self.assertEqual(rows, monday_rows)
+        self.assertIn('OFF-HOURS 2026-10-12', source)
+        load_market.assert_called_once_with(
+            '2026-10-12',
+            force_refresh=False,
+            with_source=True,
+        )
+
+    def test_exact_day_failure_uses_older_snapshot_with_stale_label(self):
+        monday = datetime(
+            2026, 10, 12, 18, 10,
+            tzinfo=ZoneInfo('Asia/Jakarta'),
+        )
+        friday_rows = [
+            dict(row('AAAA'), Date='2026-10-09'),
+            dict(row('BBBB'), Date='2026-10-09'),
+        ]
+
+        with patch.object(
+            b.tracker,
+            'latest_stock_summary_snapshot_date',
+            return_value='2026-10-09',
+        ), patch.object(
+            b.tracker,
+            'load_stock_summary_snapshot',
+            return_value=friday_rows,
+        ), patch.object(
+            b.tracker,
+            'peek_shared_stock_summary',
+            return_value=None,
+        ), patch.object(
+            b,
+            'load_market',
+            side_effect=ValueError('exact day not ready'),
+        ):
+            rows, day, source = b.load_shared_live_market(
+                with_source=True,
+                now=monday,
+            )
+
+        self.assertEqual(day, '2026-10-09')
+        self.assertEqual(rows, friday_rows)
+        self.assertIn('STALE FALLBACK', source)
+        self.assertIn('TARGET 2026-10-12', source)
 
     def test_shared_market_views_use_shared_stock_summary(self):
         a = row('AAAA')
