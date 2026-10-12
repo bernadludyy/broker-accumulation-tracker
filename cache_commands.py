@@ -109,16 +109,31 @@ def load_cached_market(*, now: datetime | None = None) -> tuple[list[dict], str,
         if rows:
             return rows, now.date().isoformat(), "PROJECT FABRIC SHARED LIVE CACHE"
 
+    candidates: list[tuple[str, int, list[dict], str]] = []
+
     local_day = tracker.latest_stock_summary_snapshot_date()
     if local_day:
-        rows = tracker.load_stock_summary_snapshot(local_day)
-        if rows:
-            return rows, local_day, "LATEST DAILY DATABASE SNAPSHOT"
+        local_rows = tracker.load_stock_summary_snapshot(local_day)
+        if local_rows:
+            # Prefer the completed daily snapshot when dates tie.
+            candidates.append(
+                (local_day, 2, local_rows, "LATEST DAILY DATABASE SNAPSHOT")
+            )
 
     shared = tracker.peek_shared_stock_summary()
-    rows = _market_rows_from_payload(shared)
-    if rows:
-        return rows, (_row_date(rows) or now.date().isoformat()), "PROJECT FABRIC SHARED CACHE"
+    shared_rows = _market_rows_from_payload(shared)
+    if shared_rows:
+        shared_day = _row_date(shared_rows) or now.date().isoformat()
+        candidates.append(
+            (shared_day, 1, shared_rows, "PROJECT FABRIC SHARED CACHE")
+        )
+
+    if candidates:
+        day, _priority, rows, source = max(
+            candidates,
+            key=lambda item: (item[0], item[1]),
+        )
+        return rows, day, source
 
     raise ValueError("Belum ada stock-summary cache yang dapat dibaca.")
 
