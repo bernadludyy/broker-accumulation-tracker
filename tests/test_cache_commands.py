@@ -146,6 +146,8 @@ class CacheCommandTests(unittest.TestCase):
             text = cc.format_breakout_ready(20)
 
         self.assertIn("BREAKOUT READY — TOP 2", text)
+        self.assertIn("History EOD: 2026-10-09", text)
+        self.assertIn("Status: FRESH EOD ✅", text)
         self.assertIn("AAAA", text)
         self.assertIn("91.5/100", text)
         self.assertIn("Distribution Risk  : 12.0/100", text)
@@ -173,10 +175,12 @@ class CacheCommandTests(unittest.TestCase):
         shared = {"data": market_rows()}
         cache_saved = datetime(2026, 10, 12, 15, 45, tzinfo=WIB)
         intel_saved = datetime(2026, 10, 12, 15, 46, tzinfo=WIB)
+        eod_saved = datetime(2026, 10, 12, 17, 5, tzinfo=WIB)
         fake = FakeConnection([
             [(cache_saved, "cuankus-momentum")],
             [(intel_saved, 963)],
             [(7,)],
+            [("SUCCESS", "2026-10-12", 84, 0, eod_saved)],
         ])
         with patch.object(
             cc.tracker,
@@ -201,6 +205,10 @@ class CacheCommandTests(unittest.TestCase):
         self.assertIn("2026-10-12", text)
         self.assertIn("Tickers   : 963", text)
         self.assertIn("Event hari ini : 7", text)
+        self.assertIn("EOD FINALIZER 17:00 WIB", text)
+        self.assertIn("Trade Day : 2026-10-12", text)
+        self.assertIn("Finalized : 84 ticker", text)
+        self.assertIn("ZAPI Call : 0", text)
         self.assertIn("tidak memanggil ZAPI", text)
 
     def test_telegram_parser_routes_six_priority_commands(self):
