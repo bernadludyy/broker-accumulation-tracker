@@ -230,25 +230,11 @@ def load_shared_live_market(with_source=False, now=None):
         payload = tracker.fetch_stock_summary(length=5000, start=0)
         rows = _market_rows_from_payload(payload)
 
-        trade_dates = sorted({
-            str(
-                row.get('Date')
-                or row.get('date')
-                or row.get('TradingDate')
-                or ''
-            )[:10]
-            for row in rows
-            if (
-                row.get('Date')
-                or row.get('date')
-                or row.get('TradingDate')
-            )
-        })
-        day = (
-            trade_dates[-1]
-            if trade_dates
-            else now.date().isoformat()
-        )
+        # The live stock-summary endpoint can retain the previous EOD
+        # Date field while its intraday values are current. For live views,
+        # label the data by the active Jakarta trading session instead of the
+        # embedded row date.
+        day = now.date().isoformat()
         source = 'PROJECT FABRIC SHARED LIVE STOCK-SUMMARY'
         return (rows, day, source) if with_source else rows
 
@@ -283,8 +269,13 @@ def load_shared_live_market(with_source=False, now=None):
         if candidate is not None:
             candidates.append(candidate)
 
-    if candidates:
-        day, rows, source = max(candidates, key=lambda item: item[0])
+    # Exact-date cache wins immediately.
+    exact_candidates = [
+        item for item in candidates
+        if item[0] == target_day
+    ]
+    if exact_candidates:
+        day, rows, source = max(exact_candidates, key=lambda item: item[0])
         if source.startswith('NEON'):
             try:
                 tracker.save_stock_summary_snapshot(
@@ -300,17 +291,52 @@ def load_shared_live_market(with_source=False, now=None):
         result = (rows, day, f'{source} | OFF-HOURS')
         return result if with_source else rows
 
-    rows, source = load_market(
-        target_day,
-        force_refresh=False,
-        with_source=True,
+    # No exact completed-day snapshot is cached. Always try the requested
+    # trading date once before accepting an older recent snapshot.
+    try:
+        rows, source = load_market(
+            target_day,
+            force_refresh=False,
+            with_source=True,
+        )
+        result = (
+            rows,
+            target_day,
+            f'{source} | OFF-HOURS {target_day}',
+        )
+        return result if with_source else rows
+    except Exception as exc:
+        print(
+            f"[BOT2-MARKET-EXACT-DATE-WARN] {target_day}: "
+            f"{type(exc).__name__}: {str(exc)[:180]}"
+        )
+
+    # Only if the exact completed trading day is unavailable may we use a
+    # recent older snapshot. Make the fallback explicit in the output.
+    if candidates:
+        day, rows, source = max(candidates, key=lambda item: item[0])
+        if source.startswith('NEON'):
+            try:
+                tracker.save_stock_summary_snapshot(
+                    day,
+                    rows,
+                    source='project-fabric:shared-v1:stock-summary',
+                )
+            except Exception as exc:
+                print(
+                    f"[BOT2-MARKET-SNAPSHOT-WARN] "
+                    f"{type(exc).__name__}: {str(exc)[:180]}"
+                )
+        result = (
+            rows,
+            day,
+            f'{source} | STALE FALLBACK | TARGET {target_day}',
+        )
+        return result if with_source else rows
+
+    raise ValueError(
+        f'Snapshot market {target_day} belum tersedia dan tidak ada fallback recent.'
     )
-    result = (
-        rows,
-        target_day,
-        f'{source} | OFF-HOURS {target_day}',
-    )
-    return result if with_source else rows
 
 
 def _decimal_comma(value, digits=2):
