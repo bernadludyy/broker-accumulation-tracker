@@ -4962,7 +4962,11 @@ def command_result(text: str, chat_id: str) -> str:
         if action in {"FOREIGN", "NETFOREIGN", "NET-FOREIGN", "NET_FOREIGN"}:
             return format_bot2_market_command("FOREIGN", limit=limit)
         if action in {"VALUE", "TRANSACTIONVALUE", "TRANSACTION-VALUE", "TRANSACTION_VALUE"}:
-            return format_top_value(limit=limit)
+            value_limit = next(
+                (int(p) for p in parts[2:] if p.isdigit()),
+                20,
+            )
+            return format_top_value(limit=value_limit)
 
     if first_lower == "net" and len(parts) >= 2 and parts[1].strip().upper() == "FOREIGN":
         limit = next(
