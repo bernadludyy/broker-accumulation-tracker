@@ -338,6 +338,11 @@ def format_breakout_ready(limit: int = 20) -> str:
                       AND cache_key LIKE 'universe:intelligence:history:v1:%%'
                       AND value_json->>'ticker' IS NOT NULL
                     ORDER BY value_json->>'ticker', saved_at DESC
+                ),
+                freshest AS (
+                    SELECT MAX(value_json->>'history_last_date') AS day
+                    FROM latest
+                    WHERE (value_json#>>'{breakout_readiness,score}') IS NOT NULL
                 )
                 SELECT
                     value_json->>'ticker',
@@ -348,8 +353,9 @@ def format_breakout_ready(limit: int = 20) -> str:
                     (value_json#>>'{breakout_readiness,range_contraction_ratio}')::double precision,
                     (value_json#>>'{entry_quality,score}')::double precision,
                     (value_json#>>'{distribution_risk,score}')::double precision
-                FROM latest
+                FROM latest, freshest
                 WHERE (value_json#>>'{breakout_readiness,score}') IS NOT NULL
+                  AND value_json->>'history_last_date' = freshest.day
                 ORDER BY
                     (value_json#>>'{breakout_readiness,score}')::double precision DESC,
                     value_json->>'ticker'
@@ -359,8 +365,11 @@ def format_breakout_ready(limit: int = 20) -> str:
             )
             rows = cur.fetchall()
 
+    fresh_day = rows[0][1] if rows else None
     lines = [
         f"🚀 BREAKOUT READY — TOP {len(rows)}",
+        f"History EOD: {fresh_day or 'N/A'}",
+        "Status: FRESH EOD ✅" if fresh_day else "Status: HISTORY BELUM TERSEDIA ⚠️",
         "Sumber: Universe Intelligence cache (tanpa ZAPI tambahan)",
         "",
     ]
@@ -456,6 +465,11 @@ def format_cache_status() -> str:
     intel_saved = None
     intel_count = None
     dynamic_count = None
+    eod_status = None
+    eod_trade_date = None
+    eod_finalized = None
+    eod_zapi_calls = None
+    eod_saved = None
 
     try:
         with _connect() as con:
@@ -505,6 +519,32 @@ def format_cache_status() -> str:
                 )
                 row = cur.fetchone()
                 dynamic_count = int(row[0]) if row else 0
+
+                cur.execute(
+                    """
+                    SELECT
+                        value_json->>'status',
+                        value_json->>'trade_date',
+                        COALESCE((value_json->>'finalized')::integer, 0),
+                        COALESCE((value_json->>'zapi_calls')::integer, 0),
+                        saved_at
+                    FROM project_fabric.cache_entries
+                    WHERE namespace=%s
+                      AND cache_key LIKE 'universe:intelligence:eod-status:v1:%%'
+                    ORDER BY saved_at DESC
+                    LIMIT 1
+                    """,
+                    (NAMESPACE,),
+                )
+                row = cur.fetchone()
+                if row:
+                    (
+                        eod_status,
+                        eod_trade_date,
+                        eod_finalized,
+                        eod_zapi_calls,
+                        eod_saved,
+                    ) = row
     except Exception as exc:
         print(f"[CACHE-STATUS-WARN] {type(exc).__name__}: {str(exc)[:160]}")
 
@@ -528,6 +568,13 @@ def format_cache_status() -> str:
         "🧠 UNIVERSE INTELLIGENCE",
         f"→ Last Save : {ts(intel_saved)}",
         f"→ Tickers   : {intel_count if intel_count is not None else 'N/A'}",
+        "",
+        "🌙 EOD FINALIZER 17:00 WIB",
+        f"→ Status    : {eod_status or 'N/A'}",
+        f"→ Trade Day : {eod_trade_date or 'N/A'}",
+        f"→ Finalized : {eod_finalized if eod_finalized is not None else 'N/A'} ticker",
+        f"→ ZAPI Call : {eod_zapi_calls if eod_zapi_calls is not None else 'N/A'}",
+        f"→ Last Run  : {ts(eod_saved)}",
         "",
         "💧 DYNAMIC LIQUIDITY",
         f"→ Event hari ini : {dynamic_count if dynamic_count is not None else 'N/A'}",
