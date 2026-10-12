@@ -19,6 +19,14 @@ from dotenv import load_dotenv
 
 import tracker
 from bot2_entry import format_bot2_entry, format_bot2_market_command
+from cache_commands import (
+    format_cache_status,
+    format_top_value,
+    format_turnover,
+    format_foreign_dip,
+    format_breakout_ready,
+    format_dynamic_liquidity,
+)
 from universe_decision import evaluate_universe, format_universe_report, summary_line
 from foreign_entry import format_foreign_entry, format_foreign_entry_scan
 from bot_io import split_message, send_message
@@ -4324,6 +4332,26 @@ FOREIGN ENTRY BOT2 REFRESH
 → Gabungkan Top50 frequency, Top30 foreign dan koreksi open→close -0,3% s.d. -5% dengan seluruh filter FOREIGN ENTRY.
 → Snapshot harian disimpan di database; REFRESH memaksa ambil ulang dari Zapi.
 
+🗄 CACHE-ONLY PRIORITY COMMANDS (0 extra ZAPI)
+CACHE STATUS
+→ Status snapshot harian, shared stock-summary, Universe Intelligence, dan dynamic-liquidity event.
+
+TOP VALUE 20
+→ Top nilai transaksi rupiah dari stock-summary cache.
+
+TURNOVER 20
+→ Ranking Value ÷ Market Cap; cari saham paling aktif relatif terhadap ukurannya.
+
+FOREIGN DIP 20
+→ Net Foreign Buy positif + koreksi open→close -0,3% s.d. -5%.
+
+BREAKOUT READY 20
+→ Ranking Breakout Readiness dari Universe Intelligence cache.
+
+DYNAMIC LIQUIDITY
+DYNAMIC LIQUIDITY 20
+→ Saham yang tercatat memenuhi tier liquidity dinamis Bot 4; observasi saja.
+
 📈 BOT2 MARKET DATA
 TOP FREQ
 TOP FREQ 20
@@ -4886,6 +4914,38 @@ def command_result(text: str, chat_id: str) -> str:
     if first_lower == "scalp":
         return format_scalp_tomorrow_scan()
 
+    # Cache-only priority commands: never issue upstream ZAPI requests.
+    if first_lower == "cache" and len(parts) >= 2 and parts[1].strip().lower() == "status":
+        return format_cache_status()
+
+    if first_lower == "turnover":
+        limit = next((int(p) for p in parts[1:] if p.isdigit()), 20)
+        return format_turnover(limit=limit)
+
+    if (
+        first_lower == "foreign"
+        and len(parts) >= 2
+        and parts[1].strip().lower() == "dip"
+    ):
+        limit = next((int(p) for p in parts[2:] if p.isdigit()), 20)
+        return format_foreign_dip(limit=limit)
+
+    if (
+        first_lower == "breakout"
+        and len(parts) >= 2
+        and parts[1].strip().lower() == "ready"
+    ):
+        limit = next((int(p) for p in parts[2:] if p.isdigit()), 20)
+        return format_breakout_ready(limit=limit)
+
+    if (
+        first_lower == "dynamic"
+        and len(parts) >= 2
+        and parts[1].strip().lower() == "liquidity"
+    ):
+        limit = next((int(p) for p in parts[2:] if p.isdigit()), 20)
+        return format_dynamic_liquidity(limit=limit)
+
     # Bot 2 market-data views from the shared Project Fabric stock-summary.
     if first_lower == "top" and len(parts) >= 2:
         action = parts[1].strip().upper()
@@ -4901,6 +4961,12 @@ def command_result(text: str, chat_id: str) -> str:
             return format_bot2_market_command("FREQ", limit=limit)
         if action in {"FOREIGN", "NETFOREIGN", "NET-FOREIGN", "NET_FOREIGN"}:
             return format_bot2_market_command("FOREIGN", limit=limit)
+        if action in {"VALUE", "TRANSACTIONVALUE", "TRANSACTION-VALUE", "TRANSACTION_VALUE"}:
+            value_limit = next(
+                (int(p) for p in parts[2:] if p.isdigit()),
+                20,
+            )
+            return format_top_value(limit=value_limit)
 
     if first_lower == "net" and len(parts) >= 2 and parts[1].strip().upper() == "FOREIGN":
         limit = next(
