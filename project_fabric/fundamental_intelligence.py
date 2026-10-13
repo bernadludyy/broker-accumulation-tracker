@@ -472,3 +472,63 @@ def fundamental_summary(result: dict[str, Any]) -> str:
         return "Fundamental: DATA TERBATAS | overlay +0"
     return f"Fundamental: {result['score']:.1f}/100 {result['tier']} | overlay {result['overlay']:+d}"
 
+
+def combine_with_technical(fundamental: dict[str, Any], evaluation: dict[str, Any]) -> dict[str, Any]:
+    """Combine the soft fundamental overlay with existing technical results.
+
+    The function deliberately does not recompute or relax a hard gate.  The
+    existing Foreign Entry result remains the source of truth for eligibility.
+    """
+    entry = evaluation.get("entry") if isinstance(evaluation, dict) else None
+    entry = entry if isinstance(entry, dict) else {}
+    base_priority = _number(evaluation.get("priority_score")) if entry else None
+    overlay = int(fundamental.get("overlay") or 0)
+    final_priority = (
+        round(max(0.0, min(100.0, base_priority + overlay)), 1)
+        if base_priority is not None else None
+    )
+    hard_gate = bool(evaluation.get("passed"))
+    fundamental_score = _number(fundamental.get("score"))
+    red_flag = bool(fundamental.get("red_flag"))
+
+    if red_flag:
+        decision = "⛔ BLOCK SWING — RED FLAG FUNDAMENTAL"
+        strategy = "Tunggu pemulihan laba dan operating cash flow."
+    elif not hard_gate:
+        decision = "⏳ WAIT — HARD GATE TEKNIKAL/FOREIGN BELUM PASS"
+        strategy = "Jangan entry; selesaikan alasan penolakan pada Foreign Entry."
+    elif fundamental_score is None:
+        decision = "✅ HARD GATE PASS — FUNDAMENTAL BELUM TERUKUR"
+        strategy = "Entry mengikuti plan teknikal, dengan prioritas tanpa bonus fundamental."
+    elif fundamental_score >= 75:
+        decision = "✅ ENTRY PRIORITAS — QUALITY + MOMENTUM SELARAS"
+        strategy = "Gunakan plan entry existing; tetap patuhi invalidasi dan ukuran risiko."
+    elif fundamental_score >= 60:
+        decision = "✅ ENTRY SELEKTIF — KONFLUENSI CUKUP"
+        strategy = "Swing selektif sesuai zona/trigger teknikal existing."
+    elif fundamental_score >= 45:
+        decision = "🟠 ENTRY TAKTIKAL — BUKAN PRIORITAS SWING"
+        strategy = "Ukuran posisi lebih kecil dan disiplin pada stop."
+    else:
+        decision = "⚠️ HARD GATE PASS, TETAPI HINDARI SWING"
+        strategy = "Batasi ke observasi/daytrade; fundamental belum mendukung holding."
+
+    component_keys = (
+        "broker_score", "technical_score", "momentum_score",
+        "volume_score", "rr_score",
+    )
+    return {
+        "decision": decision,
+        "strategy": strategy,
+        "hard_gate_passed": hard_gate,
+        "entry_score": _number(entry.get("score")),
+        "base_priority": base_priority,
+        "fundamental_overlay": overlay,
+        "final_priority": final_priority,
+        "filter_status": entry.get("filter_status") or "N/A",
+        "selected_plan": entry.get("selected_plan") or "N/A",
+        "selected_rr": _number(entry.get("selected_rr")),
+        "components": {key: _number(entry.get(key)) for key in component_keys},
+        "reasons": list(evaluation.get("reasons") or []),
+    }
+

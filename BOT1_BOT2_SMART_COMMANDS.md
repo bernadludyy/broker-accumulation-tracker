@@ -43,6 +43,13 @@ below 45. Repeated negative profit and operating cash flow produces a -12
 structural warning and blocks the *fundamental swing recommendation*. This
 does not bypass or modify any existing Bot 1 hard gate.
 
+`BOT1 FULL` now prints one combined decision panel. Its final ranking priority
+is the existing Entry+Universe priority plus the discrete fundamental overlay,
+clamped to 0–100. It also shows the unchanged technical components: Broker
+Flow /35, Trend /25, Momentum /15, Volume /10 and Risk/Reward /15. A strong
+fundamental score can improve ranking but can never turn a failed technical,
+foreign, synchronization or R:R hard gate into PASS.
+
 ## How ranking works
 
 Universe weighted score (re-normalize *available* weights; require >= 3

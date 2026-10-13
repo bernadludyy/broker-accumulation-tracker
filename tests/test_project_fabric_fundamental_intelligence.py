@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from project_fabric.fundamental_intelligence import (
+    combine_with_technical,
     choose_benchmark,
     macro_sector,
     score_fundamental,
@@ -80,6 +81,48 @@ class FundamentalIntelligenceTests(unittest.TestCase):
         self.assertTrue(result["red_flag"])
         self.assertEqual(result["overlay"], -12)
         self.assertIn("BLOCK SWING", result["tier"])
+
+    def test_combined_decision_uses_existing_gate_and_soft_overlay(self):
+        fundamental = {"score": 78, "overlay": 5, "red_flag": False}
+        evaluation = {
+            "passed": True,
+            "priority_score": 76.5,
+            "reasons": [],
+            "entry": {
+                "score": 80, "filter_status": "PASS", "selected_plan": "PULLBACK",
+                "selected_rr": 1.8, "broker_score": 28, "technical_score": 21,
+                "momentum_score": 12, "volume_score": 8, "rr_score": 12,
+            },
+        }
+        result = combine_with_technical(fundamental, evaluation)
+        self.assertEqual(result["final_priority"], 81.5)
+        self.assertTrue(result["hard_gate_passed"])
+        self.assertIn("ENTRY PRIORITAS", result["decision"])
+        self.assertEqual(result["components"]["technical_score"], 21)
+
+    def test_combined_decision_never_bypasses_failed_hard_gate(self):
+        fundamental = {"score": 90, "overlay": 5, "red_flag": False}
+        evaluation = {
+            "passed": False,
+            "priority_score": 80,
+            "reasons": ["Foreign belum confirmed."],
+            "entry": {"score": 85, "filter_status": "WAIT"},
+        }
+        result = combine_with_technical(fundamental, evaluation)
+        self.assertFalse(result["hard_gate_passed"])
+        self.assertIn("WAIT", result["decision"])
+
+    def test_red_flag_blocks_swing_even_when_technical_gate_passes(self):
+        fundamental = {"score": 70, "overlay": -12, "red_flag": True}
+        evaluation = {
+            "passed": True,
+            "priority_score": 80,
+            "reasons": [],
+            "entry": {"score": 82, "filter_status": "PASS"},
+        }
+        result = combine_with_technical(fundamental, evaluation)
+        self.assertIn("BLOCK SWING", result["decision"])
+        self.assertEqual(result["final_priority"], 68)
 
 if __name__ == "__main__":
     unittest.main()
