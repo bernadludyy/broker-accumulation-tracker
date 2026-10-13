@@ -30,6 +30,11 @@ from cache_commands import (
 from universe_decision import evaluate_universe, format_universe_report, summary_line
 from foreign_entry import format_foreign_entry, format_foreign_entry_scan
 from bot_io import split_message, send_message
+from project_fabric.fundamental_intelligence import (
+    evaluate_fundamental,
+    format_fundamental_report,
+    fundamental_summary,
+)
 from entry_engine import (
     add_indicators,
     calculate_fibonacci_golden_ratio,
@@ -4312,7 +4317,61 @@ def format_bot1_smart(ticker: str) -> str:
     return "\n".join(lines)
 
 
+def format_bot1_full(ticker: str) -> str:
+    """Fundamental overlay + all existing Bot 1 decision gates.
+
+    Fundamental only changes the displayed ranking overlay.  The existing
+    foreign, technical, R:R, synchronization and broker gates are called
+    unchanged through their current formatters.
+    """
+    code = normalize_ticker(ticker)
+    fundamental = evaluate_fundamental(code)
+    if fundamental.get("red_flag"):
+        strategy = "BLOCK SWING; tunggu pemulihan laba dan operating cash flow."
+    elif fundamental.get("score") is None:
+        strategy = "Gunakan hard gate Bot1; fundamental belum cukup untuk ranking."
+    elif fundamental["score"] >= 75:
+        strategy = "Quality–Accumulation–Momentum; prioritas bila semua hard gate PASS."
+    elif fundamental["score"] >= 60:
+        strategy = "Swing selektif; entry hanya saat broker/foreign dan teknikal sinkron."
+    elif fundamental["score"] >= 45:
+        strategy = "Taktikal/daytrade; ukuran posisi lebih kecil, jangan longgar pada stop."
+    else:
+        strategy = "Hindari swing; sinyal teknikal hanya observasi jangka pendek."
+
+    sections = [
+        "\n".join((
+            f"🧭 BOT1 FULL — {code}",
+            fundamental_summary(fundamental),
+            f"Strategi: {strategy}",
+            "Hard gate lama dan threshold teknikal tidak diubah.",
+        )),
+        format_fundamental_report(code, result=fundamental),
+    ]
+    try:
+        sections.append(format_bot1_smart(code))
+    except Exception as exc:
+        sections.append(f"🏦 BROKER + UNIVERSE — DATA TERBATAS\n{type(exc).__name__}: {str(exc)[:160]}")
+    try:
+        sections.append(format_foreign_entry(code, "SWING"))
+    except Exception as exc:
+        sections.append(f"🌍 FOREIGN + ENTRY — DATA TERBATAS\n{type(exc).__name__}: {str(exc)[:160]}")
+    return "\n\n━━━━━━━━━━━━━━━━━━━━\n\n".join(sections)
+
+
 HELP_TEXT = """🤖 BROKER QUERY BOT — COMMAND LIST
+
+📊 FUNDAMENTAL SEKTOR (Neon, 0 extra ZAPI)
+/fund ADRO
+ADRO FUND
+BOT1 FUND ADRO
+→ Score valuasi, kualitas, growth, safety dan konsistensi versus benchmark sektor.
+
+🧭 GABUNGAN SEMUA PERHITUNGAN BOT1
+/full ADRO
+ADRO FULL
+BOT1 FULL ADRO
+→ Fundamental + broker/Universe + seluruh hard gate FOREIGN ENTRY dan teknikal swing.
 
 🧠 UNIVERSE SMART V2 (cache Neon, tanpa ZAPI tambahan)
 BOT1 SMART ADRO
@@ -4757,6 +4816,16 @@ def command_result(text: str, chat_id: str) -> str:
             return "Format: /intel TICKER (contoh: /intel ADRO)"
         return format_universe_report(normalize_ticker(parts[1]))
 
+    if first_lower in {"/fund", "fund", "/fundamental", "fundamental"}:
+        if len(parts) < 2:
+            return "Format: /fund TICKER (contoh: /fund ADRO)"
+        return format_fundamental_report(normalize_ticker(parts[1]))
+
+    if first_lower in {"/full", "full"}:
+        if len(parts) < 2:
+            return "Format: /full TICKER (contoh: /full ADRO)"
+        return format_bot1_full(parts[1])
+
     if first_lower in {"/bot1smart", "bot1smart"}:
         if len(parts) < 2:
             return "Format: BOT1 SMART TICKER"
@@ -4766,6 +4835,16 @@ def command_result(text: str, chat_id: str) -> str:
         if len(parts) < 3:
             return "Format: BOT1 SMART TICKER"
         return format_bot1_smart(parts[2])
+
+    if first_lower == "bot1" and len(parts) >= 2 and parts[1].upper() in {"FUND", "FUNDAMENTAL"}:
+        if len(parts) < 3:
+            return "Format: BOT1 FUND TICKER"
+        return format_fundamental_report(normalize_ticker(parts[2]))
+
+    if first_lower == "bot1" and len(parts) >= 2 and parts[1].upper() == "FULL":
+        if len(parts) < 3:
+            return "Format: BOT1 FULL TICKER"
+        return format_bot1_full(parts[2])
 
     if first_lower == "/list":
         tickers = load_watchlist()
@@ -5231,6 +5310,12 @@ def command_result(text: str, chat_id: str) -> str:
     if "INTEL" in tokens or "UNIVERSE" in tokens:
         return format_universe_report(ticker)
 
+    if "FUND" in tokens or "FUNDAMENTAL" in tokens:
+        return format_fundamental_report(ticker)
+
+    if "FULL" in tokens:
+        return format_bot1_full(ticker)
+
     if "BOT1" in tokens and "SMART" in tokens:
         return format_bot1_smart(ticker)
 
@@ -5472,6 +5557,7 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 
 
 

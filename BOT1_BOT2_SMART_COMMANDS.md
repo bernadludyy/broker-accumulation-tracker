@@ -8,6 +8,8 @@ scheduled GitHub Actions, no independent broker claims, no auto-trading.**
 
 | Command | Result |
 | --- | --- |
+| `/fund ADRO`, `ADRO FUND`, or `BOT1 FUND ADRO` | Read-only Neon fundamental score versus adaptive sector benchmark; no ZAPI call |
+| `/full ADRO`, `ADRO FULL`, or `BOT1 FULL ADRO` | Fundamental overlay + compact broker/Universe evidence + unchanged Foreign Entry and technical hard gates |
 | `BOT1 SMART ADRO` | Compact broker 5D/20D net values, visible broker-flow label, Universe score and distribution warning |
 | `BOT2 SMART` | Top 10 ranked among existing Bot 2 market prefilter winners |
 | `BOT2 SMART 20` | Top 20 ranked among the same winners; cap 20 |
@@ -20,6 +22,26 @@ scheduled GitHub Actions, no independent broker claims, no auto-trading.**
 
 All other legacy commands (TOP FREQ, NET FOREIGN, KOREKSI, SMARTMONEY,
 FIBO, broker codes, /add, /refresh, etc.) continue unchanged.
+
+## Fundamental sector overlay
+
+The fundamental score uses an adaptive benchmark:
+
+- exact provider sector when at least 8 issuers are available;
+- 50/50 exact-sector and macro-sector percentiles for 4–7 issuers;
+- macro sector below 4 issuers, then IDX global if the macro group is also too small.
+
+Metrics are winsorized at peer P5/P95 and converted to sector percentiles.
+Default weights are Valuation 20%, Quality 30%, Growth 25%, Safety 15% and
+three-year Consistency 10%. Financials exclude conventional current ratio
+and D/E safety comparisons; technology, commodity and property policies use
+their documented sector-specific weights. Missing inputs are re-normalized,
+but coverage below 70% returns `DATA TERBATAS`.
+
+The ranking overlay is +5 for scores >=75, +2 for 60–74, 0 for 45–59 and -8
+below 45. Repeated negative profit and operating cash flow produces a -12
+structural warning and blocks the *fundamental swing recommendation*. This
+does not bypass or modify any existing Bot 1 hard gate.
 
 ## How ranking works
 
@@ -57,3 +79,4 @@ additional rank view, not a new discovery universe or buy command.
 - Telegram group settings and Bot 4 alert format are unaffected.
 
 Use `/help` for the current command list.
+
