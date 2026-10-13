@@ -2,7 +2,9 @@ name: Daily Broker Update
 
 on:
   schedule:
-    - cron: "15 18 * * 1-5"
+    - cron: "0 18 * * 1-5"
+      timezone: "Asia/Jakarta"
+    - cron: "0 19 * * 1-5"
       timezone: "Asia/Jakarta"
 
   workflow_dispatch:
@@ -45,6 +47,111 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements_github.txt
 
+      - name: Validate SQLite and decide retry work
+        id: retry_gate
+        env:
+          SCHEDULE_EXPRESSION: ${{ github.event.schedule }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import os
+          import sqlite3
+          from datetime import datetime
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+
+          import tracker
+
+          db_path = Path(os.environ.get("DB_PATH", "broker_tracker.db"))
+          if not db_path.exists():
+              raise SystemExit(f"Database tidak ditemukan: {db_path}")
+
+          with sqlite3.connect(db_path) as con:
+              quick_check = con.execute("PRAGMA quick_check").fetchone()
+              if not quick_check or quick_check[0] != "ok":
+                  raise SystemExit(
+                      f"SQLite quick_check gagal: {quick_check}"
+                  )
+              con.execute(
+                  "SELECT 1 FROM broker_daily LIMIT 1"
+              ).fetchone()
+
+          schedule = os.environ.get("SCHEDULE_EXPRESSION", "")
+          is_retry = schedule == "0 19 * * 1-5"
+          should_run = True
+          stale: list[str] = []
+          target_date = tracker.get_safe_end_date(
+              datetime.now(ZoneInfo("Asia/Jakarta")).date().isoformat()
+          )
+
+          if is_retry:
+              watchlist = [
+                  line.strip().upper()
+                  for line in Path("watchlist.txt").read_text(
+                      encoding="utf-8"
+                  ).splitlines()
+                  if line.strip()
+                  and not line.strip().startswith("#")
+              ]
+              if not watchlist:
+                  raise SystemExit("watchlist.txt kosong.")
+
+              placeholders = ",".join("?" for _ in watchlist)
+              with sqlite3.connect(db_path) as con:
+                  rows = con.execute(
+                      f"""
+                      SELECT ticker, MAX(trade_date)
+                      FROM broker_daily
+                      WHERE ticker IN ({placeholders})
+                      GROUP BY ticker
+                      """,
+                      watchlist,
+                  ).fetchall()
+
+              latest = {
+                  str(ticker).upper(): str(last_date)
+                  for ticker, last_date in rows
+                  if last_date
+              }
+              stale = [
+                  ticker
+                  for ticker in watchlist
+                  if latest.get(ticker) != target_date
+              ]
+              should_run = bool(stale)
+
+          output_path = Path(os.environ["GITHUB_OUTPUT"])
+          with output_path.open("a", encoding="utf-8") as fh:
+              fh.write(
+                  f"should_run={'true' if should_run else 'false'}\n"
+              )
+              fh.write(f"target_date={target_date}\n")
+              fh.write(f"stale_count={len(stale)}\n")
+
+          summary_path = Path(os.environ["GITHUB_STEP_SUMMARY"])
+          with summary_path.open("a", encoding="utf-8") as fh:
+              fh.write("## Daily broker refresh gate\n\n")
+              fh.write(f"- Target date: {target_date}\n")
+              fh.write(
+                  f"- Mode: {'19:00 retry' if is_retry else '18:00 primary/manual'}\n"
+              )
+              if is_retry and stale:
+                  preview = ", ".join(stale[:30])
+                  suffix = " …" if len(stale) > 30 else ""
+                  fh.write(
+                      f"- Retry diperlukan untuk {len(stale)} ticker: "
+                      f"{preview}{suffix}\n"
+                  )
+              elif is_retry:
+                  fh.write(
+                      "- Semua ticker sudah fresh; daily runner dilewati.\n"
+                  )
+              else:
+                  fh.write("- Primary refresh dijalankan.\n")
+          PY
+
       - name: Project Fabric preflight
         run: python -m project_fabric.selfcheck
 
@@ -66,7 +173,13 @@ jobs:
             fabric-cache-${{ github.ref_name }}-
 
       - name: Run existing daily runner
+        if: steps.retry_gate.outputs.should_run == 'true'
         run: python daily_runner.py
+
+      - name: Record no-op retry
+        if: steps.retry_gate.outputs.should_run == 'false'
+        run: |
+          echo "Retry 19:00 dilewati: database sudah fresh sampai ${{ steps.retry_gate.outputs.target_date }}."
 
       - name: Project Fabric API usage report
         if: always()
