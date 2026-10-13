@@ -35,6 +35,7 @@ from project_fabric.fundamental_intelligence import (
     format_combined_report,
     format_fundamental_report,
 )
+from project_fabric.bot1_rank import format_bot1_rank
 from foreign_entry import evaluate_foreign_entry
 from entry_engine import (
     add_indicators,
@@ -4356,6 +4357,11 @@ ADRO FULL
 BOT1 FULL ADRO
 → Fundamental + broker/Universe + seluruh hard gate FOREIGN ENTRY dan teknikal swing.
 
+🏆 RANKING EOD BOT1 (Neon, 0 extra ZAPI)
+BOT1 RANK
+BOT1 RANK 10
+→ Pre-screen Fundamental + Teknikal + Foreign + Universe. Broker dikonfirmasi terpisah lewat /refresh.
+
 🧠 UNIVERSE SMART V2 (cache Neon, tanpa ZAPI tambahan)
 BOT1 SMART ADRO
 → Net broker 5D/20D + penilaian dan risiko Universe.
@@ -4818,6 +4824,14 @@ def command_result(text: str, chat_id: str) -> str:
         if len(parts) < 3:
             return "Format: BOT1 SMART TICKER"
         return format_bot1_smart(parts[2])
+
+    if first_lower in {"/bot1rank", "bot1rank"}:
+        limit = next((int(p) for p in parts[1:] if p.isdigit()), 10)
+        return format_bot1_rank(limit)
+
+    if first_lower == "bot1" and len(parts) >= 2 and parts[1].upper() == "RANK":
+        limit = next((int(p) for p in parts[2:] if p.isdigit()), 10)
+        return format_bot1_rank(limit)
 
     if first_lower == "bot1" and len(parts) >= 2 and parts[1].upper() in {"FUND", "FUNDAMENTAL"}:
         if len(parts) < 3:
