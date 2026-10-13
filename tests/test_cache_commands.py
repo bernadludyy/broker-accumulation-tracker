@@ -87,6 +87,50 @@ class FakeConnection:
 
 
 class CacheCommandTests(unittest.TestCase):
+    def test_new_neon_eod_preferred_over_old_sqlite(self):
+        now = datetime(2026, 10, 13, 17, 42, tzinfo=WIB)
+        today = [dict(row, Date='2026-10-13') for row in market_rows()]
+        with patch.object(cc, '_load_archived_market', return_value=(today, '2026-10-13')), patch.object(cc.tracker, 'latest_stock_summary_snapshot_date', return_value='2026-10-12'), patch.object(cc.tracker, 'load_stock_summary_snapshot', return_value=market_rows()), patch.object(cc.tracker, 'peek_shared_stock_summary', return_value={'data': market_rows()}):
+            rows, day, source = cc.load_cached_market(now=now)
+        self.assertEqual(day, '2026-10-13')
+        self.assertEqual(source, 'NEON DAILY EOD SNAPSHOT')
+        self.assertEqual(rows, today)
+
+    def test_intraday_never_relabels_stale_source_as_today(self):
+        now = datetime(2026, 10, 13, 14, 0, tzinfo=WIB)
+        with patch.object(cc.tracker, 'peek_shared_stock_summary', return_value={'data': market_rows()}):
+            _, day, _ = cc.load_cached_market(now=now)
+        self.assertEqual(day, '2026-10-12')
+
+    def test_stale_warning_after_cutoff(self):
+        now = datetime(2026, 10, 13, 17, 42, tzinfo=WIB)
+        self.assertIn('EOD BELUM TERBARU', cc._market_freshness('2026-10-12', now))
+        self.assertIn('target 2026-10-13', cc._market_freshness('2026-10-12', now))
+        self.assertEqual(cc._market_freshness('2026-10-13', now), '')
+
+    def test_previous_session_is_expected_before_eod(self):
+        now = datetime(2026, 10, 13, 16, 30, tzinfo=WIB)
+        self.assertEqual(cc._expected_eod_date(now), '2026-10-12')
+
+    def test_weekend_expected_date_is_friday(self):
+        now = datetime(2026, 10, 17, 18, 0, tzinfo=WIB)
+        self.assertEqual(cc._expected_eod_date(now), '2026-10-16')
+
+    def test_neon_reader_preserves_real_date(self):
+        now = datetime(2026, 10, 13, 17, 42, tzinfo=WIB)
+        rows = [(dict(row, Date='2026-10-13'), '2026-10-13') for row in market_rows()]
+        with patch.object(cc, 'configured_database_url', return_value='unused'), patch.object(cc, '_connect', return_value=FakeConnection([rows])):
+            result = cc._load_archived_market(now)
+        self.assertEqual(result[1], '2026-10-13')
+
+    def test_shared_missing_date_cannot_be_today(self):
+        now = datetime(2026, 10, 13, 18, 0, tzinfo=WIB)
+        row = dict(market_rows()[0])
+        del row['Date']
+        with patch.object(cc, '_load_archived_market', return_value=None), patch.object(cc.tracker, 'latest_stock_summary_snapshot_date', return_value=None), patch.object(cc.tracker, 'peek_shared_stock_summary', return_value={'data': [row]}):
+            with self.assertRaises(ValueError):
+                cc.load_cached_market(now=now)
+
     def test_offhours_prefers_newer_shared_cache_over_older_local(self):
         now = datetime(2026, 10, 12, 19, 0, tzinfo=WIB)
         shared = {"data": market_rows()}
@@ -235,3 +279,4 @@ class CacheCommandTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

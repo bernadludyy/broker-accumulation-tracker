@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import math
 from zoneinfo import ZoneInfo
 from typing import Any
@@ -106,10 +106,16 @@ def load_cached_market(*, now: datetime | None = None) -> tuple[list[dict], str,
     if _market_in_progress(now):
         shared = tracker.peek_shared_stock_summary()
         rows = _market_rows_from_payload(shared)
-        if rows:
-            return rows, now.date().isoformat(), "PROJECT FABRIC SHARED LIVE CACHE"
+        shared_day = _row_date(rows)
+        if rows and shared_day:
+            return rows, shared_day, "PROJECT FABRIC SHARED LIVE CACHE"
 
     candidates: list[tuple[str, int, list[dict], str]] = []
+
+    archived = _load_archived_market(now)
+    if archived:
+        archived_rows, archived_day = archived
+        candidates.append((archived_day, 3, archived_rows, "NEON DAILY EOD SNAPSHOT"))
 
     local_day = tracker.latest_stock_summary_snapshot_date()
     if local_day:
@@ -123,10 +129,13 @@ def load_cached_market(*, now: datetime | None = None) -> tuple[list[dict], str,
     shared = tracker.peek_shared_stock_summary()
     shared_rows = _market_rows_from_payload(shared)
     if shared_rows:
-        shared_day = _row_date(shared_rows) or now.date().isoformat()
-        candidates.append(
-            (shared_day, 1, shared_rows, "PROJECT FABRIC SHARED CACHE")
-        )
+        shared_day = _row_date(shared_rows)
+        if shared_day:
+            # Restrict to one actual source date; never invent today's date.
+            shared_rows = [row for row in shared_rows if _row_date([row]) == shared_day]
+            candidates.append(
+                (shared_day, 1, shared_rows, "PROJECT FABRIC SHARED CACHE")
+            )
 
     if candidates:
         day, _priority, rows, source = max(
@@ -136,6 +145,48 @@ def load_cached_market(*, now: datetime | None = None) -> tuple[list[dict], str,
         return rows, day, source
 
     raise ValueError("Belum ada stock-summary cache yang dapat dibaca.")
+
+
+def _load_archived_market(now: datetime) -> tuple[list[dict], str] | None:
+    if not configured_database_url() or psycopg is None:
+        return None
+    target = _expected_eod_date(now)
+    try:
+        with _connect() as con:
+            with con.cursor() as cur:
+                cur.execute("""SELECT raw_json, trade_date
+                    FROM project_fabric.stock_summary_daily
+                    WHERE trade_date = (SELECT max(trade_date)
+                        FROM project_fabric.stock_summary_daily WHERE trade_date <= %s)
+                    ORDER BY ticker""", (target,))
+                result = cur.fetchall()
+        if not result:
+            return None
+        rows = [dict(row, ticker=_ticker(row)) for row, _ in result]
+        day = str(result[0][1])[:10]
+        if any(_row_date([row]) != day for row in rows):
+            return None
+        return rows, day
+    except Exception as exc:
+        print(f"[CACHE-EOD-WARN] Neon daily read: {type(exc).__name__}")
+        return None
+
+
+def _expected_eod_date(now: datetime) -> str:
+    local = now.astimezone(WIB)
+    day = local.date()
+    if (local.hour, local.minute) < (17, 0):
+        day -= timedelta(days=1)
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    return day.isoformat()
+
+
+def _market_freshness(day: str, now: datetime | None = None) -> str:
+    target = _expected_eod_date(now or datetime.now(WIB))
+    if day < target:
+        return f"⚠️ EOD BELUM TERBARU — target {target}, tersedia {day}. Bukan data target."
+    return ""
 
 
 def _connect():
@@ -234,6 +285,7 @@ def format_top_value(limit: int = 20) -> str:
         f"💰 TOP TRANSACTION VALUE — TOP {len(selected)}",
         f"Data: {day}",
         f"Sumber: {source}",
+        _market_freshness(day),
         f"Universe cache: {len(rows)} saham",
         "",
     ]
@@ -267,6 +319,7 @@ def format_turnover(limit: int = 20) -> str:
         f"🔥 TOP TURNOVER VALUE / MARKET CAP — TOP {len(selected)}",
         f"Data: {day}",
         f"Sumber: {source}",
+        _market_freshness(day),
         "",
     ]
     for i, (turnover, value, cap, row) in enumerate(selected, 1):
@@ -301,6 +354,7 @@ def format_foreign_dip(limit: int = 20) -> str:
         f"🌍 FOREIGN DIP — TOP {len(selected)}",
         f"Data: {day}",
         f"Sumber: {source}",
+        _market_freshness(day),
         "Syarat: Net Foreign > 0 dan koreksi open→close -0,3% s.d. -5%.",
         "",
     ]
@@ -582,3 +636,4 @@ def format_cache_status() -> str:
         "Semua status di atas hanya membaca cache/database; tidak memanggil ZAPI.",
     ]
     return "\n".join(lines)
+
