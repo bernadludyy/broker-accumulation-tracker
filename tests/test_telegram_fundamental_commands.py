@@ -19,6 +19,14 @@ class FundamentalCommandTests(unittest.TestCase):
         self.assertEqual(telegram_query_bot.command_result("BOT1 FULL ADRO", "1"), "FULL")
         self.assertEqual(formatter.call_count, 3)
 
+    @patch("telegram_query_bot.format_bot1_rank", return_value="RANK")
+    def test_rank_command_and_limit(self, formatter):
+        self.assertEqual(telegram_query_bot.command_result("BOT1 RANK", "1"), "RANK")
+        formatter.assert_called_once_with(10)
+        formatter.reset_mock()
+        self.assertEqual(telegram_query_bot.command_result("BOT1 RANK 5", "1"), "RANK")
+        formatter.assert_called_once_with(5)
+
 
 if __name__ == "__main__":
     unittest.main()
