@@ -31,12 +31,11 @@ from universe_decision import evaluate_universe, format_universe_report, summary
 from foreign_entry import format_foreign_entry, format_foreign_entry_scan
 from bot_io import split_message, send_message
 from project_fabric.fundamental_intelligence import (
-    combine_with_technical,
     evaluate_fundamental,
+    format_combined_report,
     format_fundamental_report,
-    fundamental_summary,
 )
-from foreign_entry import evaluate_foreign_entry, format_result
+from foreign_entry import evaluate_foreign_entry
 from entry_engine import (
     add_indicators,
     calculate_fibonacci_golden_ratio,
@@ -4330,53 +4329,17 @@ def format_bot1_full(ticker: str) -> str:
     fundamental = evaluate_fundamental(code)
     try:
         foreign_evaluation = evaluate_foreign_entry(code, "SWING")
-        combined = combine_with_technical(fundamental, foreign_evaluation)
-        components = combined["components"]
-        priority = (
-            f"{combined['base_priority']:.1f} {combined['fundamental_overlay']:+d} "
-            f"= {combined['final_priority']:.1f}/100"
-            if combined["final_priority"] is not None else "N/A"
-        )
-        rr = f"{combined['selected_rr']:.2f}" if combined["selected_rr"] is not None else "N/A"
-        combined_panel = "\n".join((
-            f"🧭 BOT1 FULL — {code}",
-            f"KEPUTUSAN: {combined['decision']}",
-            fundamental_summary(fundamental),
-            (
-                f"Teknikal existing: {combined['entry_score']:.0f}/100 "
-                f"| Filter {combined['filter_status']} | R:R {rr}"
-                if combined["entry_score"] is not None
-                else "Teknikal existing: DATA TERBATAS"
-            ),
-            (
-                "Komponen teknikal: "
-                f"Broker {components['broker_score'] or 0:.0f}/35 | "
-                f"Trend {components['technical_score'] or 0:.0f}/25 | "
-                f"Momentum {components['momentum_score'] or 0:.0f}/15 | "
-                f"Volume {components['volume_score'] or 0:.0f}/10 | "
-                f"R:R {components['rr_score'] or 0:.0f}/15"
-            ),
-            f"Prioritas akhir: {priority} (bukan win rate)",
-            f"Plan: {combined['selected_plan']} | Strategi: {combined['strategy']}",
-            "Hard gate lama dan threshold teknikal tidak diubah.",
-        ))
-        foreign_report = format_result(foreign_evaluation)
+        return format_combined_report(code, fundamental, foreign_evaluation)
     except Exception as exc:
-        combined_panel = "\n".join((
+        return "\n".join((
             f"🧭 BOT1 FULL — {code}",
+            "",
             "KEPUTUSAN: DATA TEKNIKAL TERBATAS",
-            fundamental_summary(fundamental),
             f"Detail: {type(exc).__name__}: {str(exc)[:160]}",
+            "",
+            f"Fundamental: {fundamental.get('tier', 'DATA TERBATAS')}",
+            f"Detail fundamental: /fund {code}",
         ))
-        foreign_report = f"🌍 FOREIGN + ENTRY — DATA TERBATAS\n{type(exc).__name__}: {str(exc)[:160]}"
-
-    sections = [combined_panel, format_fundamental_report(code, result=fundamental)]
-    try:
-        sections.append(format_bot1_smart(code))
-    except Exception as exc:
-        sections.append(f"🏦 BROKER + UNIVERSE — DATA TERBATAS\n{type(exc).__name__}: {str(exc)[:160]}")
-    sections.append(foreign_report)
-    return "\n\n━━━━━━━━━━━━━━━━━━━━\n\n".join(sections)
 
 
 HELP_TEXT = """🤖 BROKER QUERY BOT — COMMAND LIST
