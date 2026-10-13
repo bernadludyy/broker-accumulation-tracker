@@ -65,6 +65,7 @@ class Bot1RankTests(unittest.TestCase):
             }],
         }
         text = format_bot1_rank(result=result)
+        self.assertIn("SETUP RANK", text)
         self.assertIn("0 ZAPI", text)
         self.assertIn("/refresh TICKER", text)
         self.assertIn("BOT1 FULL TICKER", text)
