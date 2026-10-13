@@ -4360,7 +4360,7 @@ BOT1 FULL ADRO
 🏆 RANKING SETUP EOD (Neon, 0 extra ZAPI)
 SETUP RANK
 SETUP RANK 10
-→ Pre-screen Fundamental + Teknikal + Foreign + Universe. Broker dikonfirmasi terpisah lewat /refresh.
+→ Pre-screen Fundamental + Teknikal + Smart Money Proxy. Broker dikonfirmasi terpisah lewat /refresh.
 
 🧠 UNIVERSE SMART V2 (cache Neon, tanpa ZAPI tambahan)
 BOT1 SMART ADRO

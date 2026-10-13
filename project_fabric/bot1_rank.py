@@ -1,22 +1,24 @@
 """Cache-only EOD pre-screen for the Bot 1 Telegram command.
 
 The ranker reads one synchronized snapshot from the Project Fabric Neon
-warehouse.  It never calls ZAPI, never writes data, and never treats foreign
-aggregate value as broker confirmation.  Broker gates remain the job of
+warehouse.  It never calls ZAPI, never writes data, and uses price-volume
+behaviour only as a Smart Money proxy.  Broker gates remain the job of
 ``/refresh TICKER`` followed by ``BOT1 FULL TICKER``.
 """
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 import json
 import math
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
 from .fundamental_intelligence import score_fundamental
 from .postgres_backend import configured_database_url
+from .universe_intelligence import history_features
 
 try:
     import psycopg
@@ -24,14 +26,14 @@ except ImportError:  # pragma: no cover - optional outside GitHub runtime.
     psycopg = None
 
 
-UNIVERSE_WEIGHTS = {
-    "accumulation_persistence": 0.25,
-    "breakout_readiness": 0.25,
-    "institutional_flow": 0.20,
-    "distribution_risk": 0.15,
-    "entry_quality": 0.15,
+SMART_MONEY_WEIGHTS = {
+    "accumulation_persistence": 0.35,
+    "breakout_readiness": 0.20,
+    "distribution_risk": 0.25,
+    "entry_quality": 0.20,
 }
 MIN_HISTORY_DAYS = 50
+WIB = ZoneInfo("Asia/Jakarta")
 
 
 def _rows(cursor) -> list[dict[str, Any]]:
@@ -69,11 +71,12 @@ def _json_object(value: Any) -> dict[str, Any]:
     return {}
 
 
-def universe_snapshot(scores_json: Any) -> dict[str, Any]:
-    """Apply the same five-factor weighting as Universe Intelligence."""
+def smart_money_snapshot(scores_json: Any) -> dict[str, Any]:
+    """Build a foreign-independent price-volume Smart Money proxy."""
     items = _json_object(scores_json)
     values: dict[str, float] = {}
-    for key, weight in UNIVERSE_WEIGHTS.items():
+    raw_values: dict[str, float] = {}
+    for key, weight in SMART_MONEY_WEIGHTS.items():
         del weight
         item = items.get(key)
         if not isinstance(item, dict):
@@ -81,49 +84,62 @@ def universe_snapshot(scores_json: Any) -> dict[str, Any]:
         score = _number(item.get("score"))
         if score is None or not 0 <= score <= 100:
             continue
-        if key == "institutional_flow" and item.get("source") != "reported_foreign_value":
-            continue
+        raw_values[key] = score
         values[key] = 100.0 - score if key == "distribution_risk" else score
 
     coverage = len(values)
     if coverage < 3:
         score = None
     else:
-        numerator = sum(UNIVERSE_WEIGHTS[key] * value for key, value in values.items())
-        denominator = sum(UNIVERSE_WEIGHTS[key] for key in values)
+        numerator = sum(SMART_MONEY_WEIGHTS[key] * value for key, value in values.items())
+        denominator = sum(SMART_MONEY_WEIGHTS[key] for key in values)
         score = round(numerator / denominator, 1) if denominator else None
-    distribution = _number((items.get("distribution_risk") or {}).get("score"))
+    distribution = raw_values.get("distribution_risk")
+    accumulation = raw_values.get("accumulation_persistence")
+    risk_high = distribution is not None and distribution >= 70
+    passed = (
+        score is not None
+        and score >= 60
+        and accumulation is not None
+        and accumulation >= 50
+        and distribution is not None
+        and not risk_high
+    )
     return {
         "score": score,
         "coverage": coverage,
-        "distribution_score": distribution,
-        "risk_high": distribution is not None and distribution >= 70,
-    }
-
-
-def foreign_snapshot(history: pd.DataFrame) -> dict[str, Any]:
-    """Score reported foreign value over the last five synchronized bars."""
-    required = {"foreign_buy", "foreign_sell"}
-    if history.empty or not required.issubset(history.columns):
-        return {"score": None, "passed": False, "reason": "DATA TERBATAS"}
-    recent = history.tail(5).copy()
-    if len(recent) < 5 or recent[list(required)].isna().any().any():
-        return {"score": None, "passed": False, "reason": "DATA TERBATAS"}
-    recent["net_foreign"] = recent["foreign_buy"] - recent["foreign_sell"]
-    net_1d = float(recent.iloc[-1]["net_foreign"])
-    net_5d = float(recent["net_foreign"].sum())
-    positive_days = int((recent["net_foreign"] > 0).sum())
-    score = (35.0 if net_1d > 0 else 0.0) + (35.0 if net_5d > 0 else 0.0)
-    score += 30.0 * positive_days / 5.0
-    passed = net_1d > 0 and net_5d > 0 and positive_days >= 3
-    return {
-        "score": round(score, 1),
+        "history_last_date": items.get("history_last_date"),
         "passed": passed,
-        "net_1d": net_1d,
-        "net_5d": net_5d,
-        "positive_days": positive_days,
-        "reason": "CONFIRMED" if passed else "BELUM CONFIRMED",
+        "accumulation_score": accumulation,
+        "breakout_score": raw_values.get("breakout_readiness"),
+        "entry_quality_score": raw_values.get("entry_quality"),
+        "distribution_score": distribution,
+        "risk_high": risk_high,
     }
+
+
+def smart_money_from_history(history: pd.DataFrame, ticker: str, as_of: str) -> dict[str, Any]:
+    """Calculate the proxy through the requested completed EOD date."""
+    feature_cutoff = datetime.combine(
+        date.fromisoformat(as_of) + timedelta(days=1),
+        time.min,
+        tzinfo=WIB,
+    )
+    feature_payload = {
+        "items": [
+            {
+                "date": row["date"].date().isoformat(),
+                "open": float(row["open"]),
+                "high": float(row["high"]),
+                "low": float(row["low"]),
+                "close": float(row["close"]),
+                "volume": float(row["volume"]),
+            }
+            for _, row in history.iterrows()
+        ]
+    }
+    features = history_features(ticker, feature_payload, asof=feature_cutoff)
+    return smart_money_snapshot(features)
 
 
 def _score_rr(value: float) -> int:
@@ -245,20 +261,14 @@ def technical_snapshot(history: pd.DataFrame, ticker: str) -> dict[str, Any]:
     }
 
 
-def combined_score(fundamental: float, technical: float, foreign: float,
-                   universe: float | None) -> float:
-    components = [(fundamental, 0.35), (technical, 0.35), (foreign, 0.20)]
-    if universe is not None:
-        components.append((universe, 0.10))
-    numerator = sum(value * weight for value, weight in components)
-    denominator = sum(weight for _, weight in components)
-    return round(numerator / denominator, 1)
+def combined_score(fundamental: float, technical: float, smart_money: float) -> float:
+    return round(0.35 * fundamental + 0.35 * technical + 0.30 * smart_money, 1)
 
 
 def _load_snapshot(database_url: str | None = None) -> dict[str, Any]:
     url = (database_url if database_url is not None else configured_database_url()).strip()
     if not url or psycopg is None:
-        raise RuntimeError("Neon BOT1 RANK belum terkonfigurasi")
+        raise RuntimeError("Neon SETUP RANK belum terkonfigurasi")
     with psycopg.connect(url, connect_timeout=12, autocommit=True) as connection, connection.cursor() as cursor:
         cursor.execute(
             """SELECT ticker, company_name, sector, pe, pb, ps, roe_pct, roa_pct,
@@ -281,14 +291,10 @@ def _load_snapshot(database_url: str | None = None) -> dict[str, Any]:
                    )
                SELECT s.ticker, s.trade_date, s.open_price, s.high_price,
                       s.low_price, s.close_price, s.volume_shares,
-                      s.foreign_buy_value_idr, s.foreign_sell_value_idr,
-                      s.captured_at, c.history_days, u.scores_json,
-                      u.available_factors, u.history_last_date
+                      s.captured_at, c.history_days
                FROM project_fabric.stock_summary_daily s
                JOIN target t ON t.trade_date = s.trade_date
                JOIN coverage c ON c.ticker = s.ticker
-               LEFT JOIN project_fabric.universe_scores u
-                 ON u.ticker = s.ticker AND u.trade_date = s.trade_date
                WHERE s.close_price > 0 AND s.volume_shares > 0
                ORDER BY s.turnover_idr DESC NULLS LAST""",
             (MIN_HISTORY_DAYS,),
@@ -318,8 +324,7 @@ def _load_snapshot(database_url: str | None = None) -> dict[str, Any]:
                        AND h.trade_date <= %s
                    )
                SELECT ticker, trade_date, open_price, high_price, low_price,
-                      close_price, volume_shares, foreign_buy_value_idr,
-                      foreign_sell_value_idr
+                      close_price, volume_shares
                FROM ranked
                WHERE row_number <= 100
                ORDER BY ticker, trade_date""",
@@ -371,8 +376,6 @@ def rank_bot1(limit: int = 10, database_url: str | None = None) -> dict[str, Any
                 "low": [_number(row.get("low_price")) for row in rows],
                 "close": [_number(row.get("close_price")) for row in rows],
                 "volume": [_number(row.get("volume_shares")) for row in rows],
-                "foreign_buy": [_number(row.get("foreign_buy_value_idr")) for row in rows],
-                "foreign_sell": [_number(row.get("foreign_sell_value_idr")) for row in rows],
             })
             frame = (frame.dropna(subset=["date", "open", "high", "low", "close", "volume"])
                      .sort_values("date").drop_duplicates("date", keep="last").tail(100)
@@ -381,20 +384,20 @@ def rank_bot1(limit: int = 10, database_url: str | None = None) -> dict[str, Any
                 skipped += 1
                 continue
             technical = technical_snapshot(frame, ticker)
-            foreign = foreign_snapshot(frame)
-            if foreign.get("score") is None:
+            # stock-summary is already the completed EOD bar; include it in
+            # the proxy instead of reusing yesterday's archived feature row.
+            smart_money = smart_money_from_history(frame, ticker, as_of)
+            if smart_money.get("score") is None:
                 skipped += 1
                 continue
-            universe = universe_snapshot(market.get("scores_json"))
             score = combined_score(
                 float(fundamental["score"]), float(technical["score"]),
-                float(foreign["score"]), universe.get("score"),
+                float(smart_money["score"]),
             )
             gates = {
                 "fundamental": float(fundamental["score"]) >= 60 and not fundamental.get("red_flag"),
                 "technical": bool(technical["passed"]),
-                "foreign": bool(foreign["passed"]),
-                "distribution": not universe.get("risk_high"),
+                "smart_money": bool(smart_money["passed"]),
             }
             if all(gates.values()):
                 status = "SIAP VALIDASI BROKER"
@@ -412,8 +415,7 @@ def rank_bot1(limit: int = 10, database_url: str | None = None) -> dict[str, Any
                 "status_order": status_order,
                 "fundamental": fundamental,
                 "technical": technical,
-                "foreign": foreign,
-                "universe": universe,
+                "smart_money": smart_money,
                 "gates": gates,
             })
         except Exception:
@@ -427,20 +429,6 @@ def rank_bot1(limit: int = 10, database_url: str | None = None) -> dict[str, Any
         "skipped": skipped,
         "rows": ranked[:requested],
     }
-
-
-def _compact_rupiah(value: float | None) -> str:
-    if value is None:
-        return "N/A"
-    sign = "+" if value > 0 else "-" if value < 0 else ""
-    amount = abs(value)
-    if amount >= 1_000_000_000_000:
-        return f"{sign}Rp{amount / 1_000_000_000_000:.2f}T"
-    if amount >= 1_000_000_000:
-        return f"{sign}Rp{amount / 1_000_000_000:.2f}B"
-    if amount >= 1_000_000:
-        return f"{sign}Rp{amount / 1_000_000:.2f}M"
-    return f"{sign}Rp{amount:,.0f}"
 
 
 def _price(value: float) -> str:
@@ -460,31 +448,36 @@ def format_bot1_rank(limit: int = 10, result: dict[str, Any] | None = None) -> s
     if not rows:
         return "\n".join((
             f"🧭 SETUP RANK — EOD {result.get('as_of') or 'N/A'}",
-            "Tidak ada kandidat dengan data Fundamental + Teknikal + Foreign yang lengkap.",
+            "Tidak ada kandidat dengan data Fundamental + Teknikal + Smart Money yang lengkap.",
             "0 ZAPI | Broker tidak diperbarui.",
         ))
     lines = [
         f"🧭 SETUP RANK — EOD {result.get('as_of')}",
         "Pre-screen Neon | 0 ZAPI | Broker belum dicek",
-        "Bobot: Fundamental 35 | Teknikal 35 | Foreign 20 | Universe 10",
+        "Bobot: Fundamental 35 | Teknikal 35 | Smart Money 30",
         f"Tersaring: {result.get('eligible', len(rows))} | Ditampilkan: {len(rows)}",
     ]
     for index, row in enumerate(rows, start=1):
         fundamental = row["fundamental"]
         technical = row["technical"]
-        foreign = row["foreign"]
-        universe = row["universe"]
-        universe_text = "N/A" if universe.get("score") is None else f"{universe['score']:.0f}"
+        smart_money = row["smart_money"]
+        accumulation = smart_money.get("accumulation_score")
+        breakout = smart_money.get("breakout_score")
+        distribution = smart_money.get("distribution_score")
+        accumulation_text = "N/A" if accumulation is None else f"{accumulation:.0f}"
+        breakout_text = "N/A" if breakout is None else f"{breakout:.0f}"
+        distribution_text = "N/A" if distribution is None else f"{distribution:.0f}"
         lines.extend((
             "",
             f"{index}. {row['ticker']} — {row['score']:.1f} | {row['status']}",
-            f"F {fundamental['score']:.0f} | T {technical['score']:.0f} | For {foreign['score']:.0f} | U {universe_text}",
-            f"Foreign 5D {_compact_rupiah(foreign.get('net_5d'))} ({foreign.get('positive_days', 0)}/5) | {technical['trend']} | R:R {technical['selected_rr']:.2f}",
+            f"F {fundamental['score']:.0f} | T {technical['score']:.0f} | SM {smart_money['score']:.0f}",
+            f"SM Akum {accumulation_text} | Break {breakout_text} | DistRisk {distribution_text}",
+            f"{technical['trend']} | R:R {technical['selected_rr']:.2f}",
             f"{technical['selected_plan']} {_price(technical['entry_low'])}–{_price(technical['entry_high'])} | Inv <{_price(technical['invalidation'])} | TP1 {_price(technical['tp1'])}",
         ))
     lines.extend((
         "",
         "Final: pilih kandidat teratas, lalu /refresh TICKER dan BOT1 FULL TICKER.",
-        "Ranking ini pre-screen EOD, bukan sinyal beli dan bukan konfirmasi broker.",
+        "Smart Money adalah proxy harga-volume, bukan konfirmasi broker atau bandar.",
     ))
     return "\n".join(lines)
