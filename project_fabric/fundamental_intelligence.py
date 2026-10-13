@@ -532,3 +532,179 @@ def combine_with_technical(fundamental: dict[str, Any], evaluation: dict[str, An
         "reasons": list(evaluation.get("reasons") or []),
     }
 
+
+def _compact_money(value: Any) -> str:
+    number = _number(value)
+    if number is None:
+        return "N/A"
+    sign = "+" if number > 0 else "-" if number < 0 else ""
+    absolute = abs(number)
+    if absolute >= 1e12:
+        return f"{sign}Rp{absolute / 1e12:.2f}T"
+    if absolute >= 1e9:
+        return f"{sign}Rp{absolute / 1e9:.2f}M"
+    if absolute >= 1e6:
+        return f"{sign}Rp{absolute / 1e6:.1f}Jt"
+    return f"{sign}Rp{absolute:,.0f}"
+
+
+def _compact_growth(value: Any) -> str:
+    number = _number(value)
+    if number is None:
+        return "N/A"
+    if number <= -999:
+        return "turun ekstrem"
+    if number >= 999:
+        return "naik ekstrem"
+    return f"{number:+.1f}%"
+
+
+def format_combined_report(
+    ticker: str,
+    fundamental: dict[str, Any],
+    evaluation: dict[str, Any],
+) -> str:
+    """Short, spaced Telegram decision card for BOT1 FULL."""
+    combined = combine_with_technical(fundamental, evaluation)
+    entry = evaluation.get("entry") if isinstance(evaluation.get("entry"), dict) else {}
+    foreign = evaluation.get("foreign") if isinstance(evaluation.get("foreign"), dict) else {}
+    universe = evaluation.get("universe") if isinstance(evaluation.get("universe"), dict) else {}
+    target = fundamental.get("target") if isinstance(fundamental.get("target"), dict) else {}
+    categories = fundamental.get("categories") if isinstance(fundamental.get("categories"), dict) else {}
+    growth = fundamental.get("growth") if isinstance(fundamental.get("growth"), dict) else {}
+    growth_values = growth.get("values") if isinstance(growth.get("values"), dict) else {}
+    components = combined["components"]
+
+    base = combined["base_priority"]
+    final = combined["final_priority"]
+    priority = (
+        f"{base:.1f} {combined['fundamental_overlay']:+d} = {final:.1f}/100"
+        if base is not None and final is not None else "N/A"
+    )
+    fundamental_score = _number(fundamental.get("score"))
+    universe_score = _number(universe.get("score"))
+    entry_score = combined["entry_score"]
+    score_line = (
+        f"Entry {entry_score:.0f} | Universe "
+        f"{universe_score:.0f}" if entry_score is not None and universe_score is not None
+        else f"Entry {entry_score:.0f} | Universe N/A" if entry_score is not None
+        else "Entry N/A | Universe N/A"
+    )
+    score_line += (
+        f" | Fundamental {fundamental_score:.0f}"
+        if fundamental_score is not None else " | Fundamental N/A"
+    )
+
+    def component(name: str) -> float:
+        return components.get(name) or 0.0
+
+    lines = [
+        f"🧭 BOT1 FULL — {ticker}",
+        "",
+        "🎯 KEPUTUSAN",
+        combined["decision"],
+        f"Prioritas: {priority}",
+        "",
+        "📊 SKOR",
+        score_line,
+        "",
+        "📈 TEKNIKAL",
+        (
+            f"Broker {component('broker_score'):.0f}/35 | "
+            f"Trend {component('technical_score'):.0f}/25 | "
+            f"Momentum {component('momentum_score'):.0f}/15"
+        ),
+        (
+            f"Volume {component('volume_score'):.0f}/10 | "
+            f"R:R {component('rr_score'):.0f}/15 | "
+            f"Filter {combined['filter_status']}"
+        ),
+    ]
+
+    if entry:
+        broker_1d = entry.get("broker_today") or {}
+        broker_5d = entry.get("broker_5d") or {}
+        broker_20d = entry.get("broker_20d") or {}
+        lines.append(
+            f"Flow: 1D {broker_1d.get('flow', 'N/A')} | "
+            f"5D {broker_5d.get('flow', 'N/A')} | "
+            f"20D {broker_20d.get('flow', 'N/A')}"
+        )
+
+    category_labels = (
+        ("valuation", "Val"), ("quality", "Qua"), ("growth", "Gro"),
+        ("safety", "Saf"), ("consistency", "Con"),
+    )
+    category_text = " | ".join(
+        f"{label} {float(categories[name]):.0f}"
+        for name, label in category_labels
+        if categories.get(name) is not None
+    )
+    lines += [
+        "",
+        "💼 FUNDAMENTAL",
+        f"{target.get('sector') or 'Sektor N/A'} | {fundamental.get('tier', 'DATA TERBATAS')}",
+        category_text or "Komponen belum lengkap",
+        (
+            f"Growth: Rev {_compact_growth(growth_values.get('revenue'))} | "
+            f"Laba {_compact_growth(growth_values.get('net_profit_loss'))} | "
+            f"OCF {_compact_growth(growth_values.get('operating_cash_flow'))}"
+        ),
+        "",
+        "🌍 FOREIGN",
+    ]
+    if foreign:
+        lines += [
+            "CONFIRMED ✅" if foreign.get("confirmed") else "BELUM CONFIRMED ⏳",
+            (
+                f"5D {_compact_money(foreign.get('net_5d'))} | "
+                f"1D {_compact_money(foreign.get('net_1d'))} | "
+                f"Net buy {foreign.get('positive_days', 0)}/5 hari"
+            ),
+        ]
+    else:
+        lines.append("DATA TERBATAS")
+
+    lines += ["", "📍 SETUP"]
+    rr = combined.get("selected_rr")
+    if entry and combined["selected_plan"] == "BREAKOUT":
+        lines += [
+            f"BREAKOUT > {float(entry.get('breakout_entry') or 0):,.0f} | R:R {rr:.2f}" if rr is not None else
+            f"BREAKOUT > {float(entry.get('breakout_entry') or 0):,.0f}",
+            (
+                f"Stop {max(1.0, float(entry.get('breakout_level') or 0) - float(entry.get('atr14') or 0) * .5):,.0f}"
+                f" | TP1 {float(entry.get('breakout_tp1') or 0):,.0f}"
+            ),
+        ]
+    elif entry:
+        lines += [
+            (
+                f"PULLBACK {float(entry.get('entry1_low') or 0):,.0f}–"
+                f"{float(entry.get('entry1_high') or 0):,.0f} | "
+                f"R:R {rr:.2f}" if rr is not None else
+                f"PULLBACK {float(entry.get('entry1_low') or 0):,.0f}–{float(entry.get('entry1_high') or 0):,.0f}"
+            ),
+            (
+                f"Invalid < {float(entry.get('invalidation') or 0):,.0f} | "
+                f"TP1 {float(entry.get('pullback_tp1') or 0):,.0f}"
+            ),
+        ]
+    else:
+        lines.append("Belum tersedia.")
+
+    reasons = combined.get("reasons") or []
+    if reasons:
+        lines += ["", "⚠️ YANG HARUS DITUNGGU"]
+        lines.extend(f"• {reason}" for reason in reasons[:3])
+        if len(reasons) > 3:
+            lines.append(f"• +{len(reasons) - 3} alasan lain")
+
+    lines += [
+        "",
+        f"Strategi: {combined['strategy']}",
+        "",
+        f"Detail: /fund {ticker} | /intel {ticker}",
+        f"Gate lengkap: {ticker} FOREIGN ENTRY",
+    ]
+    return "\n".join(lines)
+

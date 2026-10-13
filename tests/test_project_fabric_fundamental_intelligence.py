@@ -5,6 +5,7 @@ import unittest
 from project_fabric.fundamental_intelligence import (
     combine_with_technical,
     choose_benchmark,
+    format_combined_report,
     macro_sector,
     score_fundamental,
 )
@@ -123,6 +124,38 @@ class FundamentalIntelligenceTests(unittest.TestCase):
         result = combine_with_technical(fundamental, evaluation)
         self.assertIn("BLOCK SWING", result["decision"])
         self.assertEqual(result["final_priority"], 68)
+
+    def test_compact_report_has_spaced_sections_and_detail_commands(self):
+        fundamental = {
+            "score": 57, "overlay": 0, "red_flag": False, "tier": "TAKTIKAL",
+            "target": {"sector": "Online Applications & Service"},
+            "categories": {"valuation": 48, "quality": 49, "growth": 70,
+                           "safety": 31, "consistency": 83},
+            "growth": {"values": {"revenue": 205.9, "net_profit_loss": 45.3,
+                                  "operating_cash_flow": -10533.3}},
+        }
+        evaluation = {
+            "passed": False, "priority_score": 61.2,
+            "reasons": ["Foreign belum confirmed."],
+            "universe": {"score": 70},
+            "foreign": {"confirmed": False, "net_5d": -1e9, "net_1d": 2e8,
+                        "positive_days": 2},
+            "entry": {
+                "score": 58, "filter_status": "WAIT", "selected_plan": "PULLBACK",
+                "selected_rr": 1.4, "broker_score": 12, "technical_score": 18,
+                "momentum_score": 10, "volume_score": 6, "rr_score": 6,
+                "broker_today": {"flow": "MIXED"}, "broker_5d": {"flow": "DISTRIBUTION"},
+                "broker_20d": {"flow": "MIXED"}, "entry1_low": 60,
+                "entry1_high": 62, "invalidation": 57, "pullback_tp1": 68,
+            },
+        }
+        report = format_combined_report("GOTO", fundamental, evaluation)
+        for heading in ("🎯 KEPUTUSAN", "📊 SKOR", "📈 TEKNIKAL",
+                        "💼 FUNDAMENTAL", "🌍 FOREIGN", "📍 SETUP"):
+            self.assertIn("\n\n" + heading + "\n", report)
+        self.assertIn("OCF turun ekstrem", report)
+        self.assertIn("Detail: /fund GOTO | /intel GOTO", report)
+        self.assertLess(len(report), 1800)
 
 if __name__ == "__main__":
     unittest.main()

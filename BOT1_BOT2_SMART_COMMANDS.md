@@ -50,6 +50,11 @@ Flow /35, Trend /25, Momentum /15, Volume /10 and Risk/Reward /15. A strong
 fundamental score can improve ranking but can never turn a failed technical,
 foreign, synchronization or R:R hard gate into PASS.
 
+The Telegram FULL output is intentionally compact and separated by blank lines
+into Decision, Score, Technical, Fundamental, Foreign and Setup blocks. Detailed
+subreports are not duplicated; use `/fund TICKER`, `/intel TICKER`, or
+`TICKER FOREIGN ENTRY` when drill-down is needed.
+
 ## How ranking works
 
 Universe weighted score (re-normalize *available* weights; require >= 3
