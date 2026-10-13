@@ -452,19 +452,19 @@ def format_bot1_rank(limit: int = 10, result: dict[str, Any] | None = None) -> s
         result = result or rank_bot1(limit)
     except Exception as exc:
         return "\n".join((
-            "🧭 BOT1 RANK — DATA TERBATAS",
+            "🧭 SETUP RANK — DATA TERBATAS",
             f"Detail: {type(exc).__name__}: {str(exc)[:160]}",
             "Tidak ada ZAPI yang dipanggil.",
         ))
     rows = result.get("rows") or []
     if not rows:
         return "\n".join((
-            f"🧭 BOT1 RANK — EOD {result.get('as_of') or 'N/A'}",
+            f"🧭 SETUP RANK — EOD {result.get('as_of') or 'N/A'}",
             "Tidak ada kandidat dengan data Fundamental + Teknikal + Foreign yang lengkap.",
             "0 ZAPI | Broker tidak diperbarui.",
         ))
     lines = [
-        f"🧭 BOT1 RANK — EOD {result.get('as_of')}",
+        f"🧭 SETUP RANK — EOD {result.get('as_of')}",
         "Pre-screen Neon | 0 ZAPI | Broker belum dicek",
         "Bobot: Fundamental 35 | Teknikal 35 | Foreign 20 | Universe 10",
         f"Tersaring: {result.get('eligible', len(rows))} | Ditampilkan: {len(rows)}",
