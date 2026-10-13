@@ -4357,9 +4357,9 @@ ADRO FULL
 BOT1 FULL ADRO
 → Fundamental + broker/Universe + seluruh hard gate FOREIGN ENTRY dan teknikal swing.
 
-🏆 RANKING EOD BOT1 (Neon, 0 extra ZAPI)
-BOT1 RANK
-BOT1 RANK 10
+🏆 RANKING SETUP EOD (Neon, 0 extra ZAPI)
+SETUP RANK
+SETUP RANK 10
 → Pre-screen Fundamental + Teknikal + Foreign + Universe. Broker dikonfirmasi terpisah lewat /refresh.
 
 🧠 UNIVERSE SMART V2 (cache Neon, tanpa ZAPI tambahan)
@@ -4825,11 +4825,11 @@ def command_result(text: str, chat_id: str) -> str:
             return "Format: BOT1 SMART TICKER"
         return format_bot1_smart(parts[2])
 
-    if first_lower in {"/bot1rank", "bot1rank"}:
+    if first_lower in {"/setuprank", "setuprank"}:
         limit = next((int(p) for p in parts[1:] if p.isdigit()), 10)
         return format_bot1_rank(limit)
 
-    if first_lower == "bot1" and len(parts) >= 2 and parts[1].upper() == "RANK":
+    if first_lower == "setup" and len(parts) >= 2 and parts[1].upper() == "RANK":
         limit = next((int(p) for p in parts[2:] if p.isdigit()), 10)
         return format_bot1_rank(limit)
 
