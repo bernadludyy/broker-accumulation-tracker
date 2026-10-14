@@ -630,6 +630,9 @@ def format_combined_report(
             f"5D {broker_5d.get('flow', 'N/A')} | "
             f"20D {broker_20d.get('flow', 'N/A')}"
         )
+    warnings = evaluation.get("warnings") or []
+    if warnings:
+        lines.append(f"Data: {warnings[0]}")
 
     category_labels = (
         ("valuation", "Val"), ("quality", "Qua"), ("growth", "Gro"),
