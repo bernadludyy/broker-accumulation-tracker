@@ -18,6 +18,8 @@ CC NI TOP YTD
 CC NI TOP SELL YTD
 → Top 3 saham Net Sell oleh broker NI.
 → Ranking seluruh ticker yang memiliki histori broker tersimpan, bukan seluruh IDX.
+→ Setiap peringkat: Weighted Avg Buy (net buy) / Avg Sell (net sell).
+→ Perhitungan avg = total value sisi ÷ (total lot sisi × 100), bukan avg posisi net.
 → PARTIAL/UNVERIFIED berarti coverage YTD belum dapat dipastikan.
 """
 

@@ -292,6 +292,24 @@ arsip EOD `stock-summary` Neon saja tidak cukup untuk menghasilkan broker
 history YTD. Jika data kosong, periksa `/status TICKER` dan pertimbangkan
 `/refresh TICKER` (perintah refresh dapat memakai kuota ZAPI).
 
+### Weighted Avg Price di semua ranking Top 3
+
+Setiap baris ranking sekarang menyertakan **WAvg Buy** pada sisi Net Buy dan
+**WAvg Sell** pada sisi Net Sell. Per broker-saham, rata-rata *per lembar*
+berasal dari YTD sisi transaksi yang sesuai, bukan rata-rata sederhana harian:
+
+- WAvg Buy = total nilai BUY terlihat ÷ (total lot BUY terlihat × 100).
+- WAvg Sell = total nilai SELL terlihat ÷ (total lot SELL terlihat × 100).
+
+Contoh: bila broker melakukan BUY Rp 115 juta atas 500 lot, WAvg Buy
+Rp 2.300 per saham. Transaksi SELL selama periode itu tetap mengurangi
+**ranking Net Buy Value**, tetapi tidak dipakai untuk menghitung WAvg Buy.
+Karena itu WAvg Buy **bukan** harga pokok posisi net saham yang masih dimiliki
+broker, dan tidak otomatis sama dengan harga rata-rata net akumulasi.
+Jika nilai/lot sisi relevan tidak valid atau nol, tampilkan `N/A`, bukan
+angka 0 atau pembagian dengan nol. Sumber broker-summary upstream tidak
+selalu mencakup semua broker, maka hasil dibatasi pada aktivitas terlihat.
+
 Pengiriman command baru dilewatkan melalui `broker_ytd_dispatch.py` di
 workflow `telegram_query.yml`; command existing tetap memakai handler lama,
 termasuk authorization dan de-duplication. Query Top 3 sendiri tidak membuat

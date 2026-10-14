@@ -68,7 +68,10 @@ class BrokerYtdMatrixTests(unittest.TestCase):
         self.assertIn("2. CC | +Rp 2.5 Rb", reply)
         self.assertIn("3. HY | +Rp 1.0 Rb", reply)
         self.assertIn("Total Top 3: +Rp 13.5 Rb", reply)
+        self.assertIn("WAvg Buy: Rp 3.83", reply)
+        self.assertEqual(reply.count("WAvg Buy:"), 3)
         self.assertIn("1. YP | -Rp 6.0 Rb", reply)
+        self.assertIn("WAvg Sell: Rp 5.00", reply)
         self.assertIn("Total Top 3: -Rp 6.0 Rb", reply)
         self.assertIn("PARTIAL", reply)
         self.assertNotIn("999,999", reply)
@@ -81,6 +84,10 @@ class BrokerYtdMatrixTests(unittest.TestCase):
         self.assertIn("3. BBNI | +Rp 1.0 Rb", reply)
         self.assertIn("Total Net BUY Top 3: +Rp 13.0 Rb", reply)
         self.assertIn("Cakupan: 4 ticker", reply)
+        self.assertIn("WAvg Buy: Rp 3.83", reply)
+        self.assertIn("WAvg Buy: Rp 4.00", reply)
+        self.assertIn("WAvg Buy: Rp 5.00", reply)
+        self.assertEqual(reply.count("WAvg Buy:"), 3)
         self.assertIn("PARTIAL", reply)
 
     def test_broker_sell_mode_and_empty_result(self):
@@ -90,10 +97,45 @@ class BrokerYtdMatrixTests(unittest.TestCase):
         self.assertIn("1. TLKM | -Rp 8.0 Rb", reply)
         self.assertIn("2. BBRI | -Rp 6.0 Rb", reply)
         self.assertIn("Total Net SELL Top 3: -Rp 14.0 Rb", reply)
+        self.assertIn("WAvg Sell: Rp 4.00", reply)
+        self.assertIn("WAvg Sell: Rp 5.00", reply)
         self.assertIn(
             "Tidak ada Net BUY ZZ",
             matrix.format_broker_top("ZZ", self.db_path, "2026-10-14"),
         )
+
+    def test_weighted_average_is_side_based_not_net_cost_basis(self):
+        row = {
+            "buy_value": 11500, "buy_lots": 30,
+            "sell_value": 1500, "sell_lots": 4,
+            "net_value": 10000, "net_lots": 26,
+        }
+        self.assertAlmostEqual(matrix._weighted_avg_price(row, "BUY"), 11500 / 3000)
+        self.assertAlmostEqual(matrix._weighted_avg_price(row, "SELL"), 1500 / 400)
+        self.assertNotAlmostEqual(
+            matrix._weighted_avg_price(row, "BUY"),
+            row["net_value"] / (row["net_lots"] * 100),
+        )
+        with self.assertRaises(ValueError):
+            matrix._weighted_avg_price(row, "NET")
+
+    def test_zero_lots_or_missing_data_yield_na(self):
+        for row in (
+            {"buy_value": 1200, "buy_lots": 0},
+            {"buy_value": 0, "buy_lots": 10},
+            {"buy_value": 1000, "buy_lots": None},
+            {"buy_value": float("inf"), "buy_lots": 10},
+        ):
+            self.assertEqual(matrix._format_avg_price(row, "BUY"), "N/A")
+        with sqlite3.connect(self.db_path) as con:
+            con.execute(
+                "INSERT INTO broker_daily "
+                "(trade_date,ticker,broker,side,lots,value) "
+                "VALUES ('2026-10-14','ZERO','ZZ','BUY',0,1000)"
+            )
+            con.commit()
+        reply = matrix.format_ticker_top("ZERO", self.db_path, "2026-10-14")
+        self.assertIn("WAvg Buy: N/A", reply)
 
     def test_no_data_and_invalid_inputs(self):
         self.assertIn(

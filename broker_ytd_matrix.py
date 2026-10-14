@@ -5,6 +5,7 @@ activity*, not broker custody/inventory or a complete IDX universe.
 """
 from __future__ import annotations
 
+import math
 import re
 import sqlite3
 from collections import defaultdict
@@ -29,6 +30,31 @@ def rupiah(value: float) -> str:
     if amount >= 1_000:
         return f"{sign}Rp {amount / 1_000:,.1f} Rb"
     return f"{sign}Rp {amount:,.0f}"
+
+
+def _weighted_avg_price(row: dict, side: str) -> float | None:
+    """Weighted mean price per share from BUY or SELL gross-side turnover.
+
+    This is NOT a cost basis for net shares held: sells may have occurred
+    during the window. Broker-summary visibility can also be incomplete.
+    IDX has 100 shares per lot. Never return a fictitious price for zero lot.
+    """
+    if side not in {"BUY", "SELL"}:
+        raise ValueError("Side must be BUY or SELL")
+    key = side.lower()
+    lots = float(row.get(f"{key}_lots", 0) or 0)
+    value = float(row.get(f"{key}_value", 0) or 0)
+    if not (math.isfinite(lots) and math.isfinite(value)):
+        return None
+    if lots <= 0 or value <= 0:
+        return None
+    price = value / (lots * 100)
+    return price if math.isfinite(price) and price > 0 else None
+
+
+def _format_avg_price(row: dict, side: str) -> str:
+    avg = _weighted_avg_price(row, side)
+    return f"Rp {avg:,.2f}" if avg is not None else "N/A"
 
 
 def _read_db(db_path: str) -> sqlite3.Connection:
@@ -160,6 +186,8 @@ def _warn() -> list[str]:
         "Broker yang tidak muncul di snapshot tidak berarti transaksinya nol.",
         "Cakupan terbatas pada histori tersimpan; bukan ranking seluruh IDX.",
         "UNVERIFIED bukan konfirmasi bahwa histori YTD lengkap.",
+        "WAvg Buy/Sell = value sisi BUY/SELL ÷ (lot sisi tersebut × 100).",
+        "WAvg bukan harga modal net lot atau bukti kepemilikan broker.",
     ]
 
 
@@ -211,6 +239,7 @@ def format_ticker_top(ticker: str, db_path: str, asof: str, top_n: int = 3) -> s
     lines += [
         f"{i}. {r['code']} | {rupiah(r['net_value'])} "
         f"| {int(r['net_lots']):+,} lot | {r['buy_days']} hari net buy"
+        f"\n   WAvg Buy: {_format_avg_price(r, 'BUY')}"
         for i, r in enumerate(buyers, 1)
     ] or ["Belum ada broker net buy positif."]
     lines.append(
@@ -222,6 +251,7 @@ def format_ticker_top(ticker: str, db_path: str, asof: str, top_n: int = 3) -> s
     lines += [
         f"{i}. {r['code']} | {rupiah(r['net_value'])} "
         f"| {int(r['net_lots']):+,} lot | {r['sell_days']} hari net sell"
+        f"\n   WAvg Sell: {_format_avg_price(r, 'SELL')}"
         for i, r in enumerate(sellers, 1)
     ] or ["Belum ada broker net sell negatif."]
     lines.append(f"Total Top 3: {rupiah(sell_total)}")
@@ -277,6 +307,7 @@ def format_broker_top(
         lines += [
             f"{i}. {row['code']} | {rupiah(row['net_value'])} "
             f"| {int(row['net_lots']):+,} lot",
+            f"   WAvg {mode.title()}: {_format_avg_price(row, mode)}",
             f"   Broker: {row['buy_days' if mode == 'BUY' else 'sell_days']} "
             f"hari net {mode} | Cache saham: {c.get('days', 0)}"
             f"/{c.get('reference_days', len(ref))} "
