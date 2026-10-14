@@ -78,7 +78,8 @@ def evaluate_foreign_entry(ticker: str, mode: str = 'SWING', *, as_of: str | Non
     # The same closed daily rows feed both foreign and entry scoring.
     history = history.loc[history['date'].dt.strftime('%Y-%m-%d') <= safe_date].copy()
     result = {'ticker': ticker, 'mode': mode, 'passed': False, 'minimum_score': minimum,
-              'date': None, 'safe_date': safe_date, 'entry': None, 'foreign': None, 'reasons': []}
+              'date': None, 'safe_date': safe_date, 'entry': None, 'foreign': None,
+              'reasons': [], 'warnings': []}
     if len(history) < 50:
         result['reasons'].append('Histori harga belum 50 hari untuk EMA50.')
         return result
@@ -86,19 +87,38 @@ def evaluate_foreign_entry(ticker: str, mode: str = 'SWING', *, as_of: str | Non
     if result['date'] != safe_date:
         result['reasons'].append(f'Data harga terakhir {result["date"]}; perlu {safe_date}.')
         return result
-    numeric = history[['open', 'high', 'low', 'close', 'volume']].apply(pd.to_numeric, errors='coerce')
-    valid = (numeric.apply(lambda column: column.map(math.isfinite)).all().all()
-             and (numeric[['open', 'high', 'low', 'close']] > 0).all().all()
-             and (numeric['volume'] >= 0).all()
-             and (numeric['high'] >= numeric[['open', 'close', 'low']].max(axis=1)).all()
-             and (numeric['low'] <= numeric[['open', 'close', 'high']].min(axis=1)).all())
-    if not valid:
-        result['reasons'].append('OHLCV tidak valid; perhitungan entry ditahan.')
-        return result
+    # Foreign monetary values are independent from the opening price. Evaluate
+    # them before the technical quality gate so a provider-side open=0 does not
+    # incorrectly turn real foreign data into DATA TERBATAS.
     foreign = foreign_confirmation(history)
     result['foreign'] = foreign
     if not foreign['confirmed']:
         result['reasons'].append(foreign['reason'])
+
+    # Bot 1 indicators and entry levels use HLCV. Some IDX history rows arrive
+    # with open=0 even though high/low/close/volume and reported foreign values
+    # are complete. Keep Open as a transparent warning, never fabricate it from
+    # previous close, and fail closed only for required technical fields.
+    numeric = history[['open', 'high', 'low', 'close', 'volume']].apply(pd.to_numeric, errors='coerce')
+    hlcv = numeric[['high', 'low', 'close', 'volume']]
+    valid_hlcv = (hlcv.apply(lambda column: column.map(math.isfinite)).all().all()
+                  and (hlcv[['high', 'low', 'close']] > 0).all().all()
+                  and (hlcv['volume'] >= 0).all()
+                  and (hlcv['high'] >= hlcv[['close', 'low']].max(axis=1)).all()
+                  and (hlcv['low'] <= hlcv[['close', 'high']].min(axis=1)).all())
+    if not valid_hlcv:
+        result['reasons'].append('HLCV tidak valid; perhitungan teknikal/setup ditahan.')
+        return result
+
+    open_valid = (numeric['open'].map(math.isfinite)
+                  & (numeric['open'] > 0)
+                  & (numeric['open'] >= numeric['low'])
+                  & (numeric['open'] <= numeric['high']))
+    invalid_open = int((~open_valid).sum())
+    if invalid_open:
+        result['warnings'].append(
+            f'Open tidak tersedia pada {invalid_open}/{len(history)} candle; setup memakai HLCV.'
+        )
     entry = build_entry_score(ticker, mode, history=history)
     result['entry'] = entry
     if entry['score'] < minimum:
@@ -155,6 +175,8 @@ def format_result(result: dict) -> str:
                   'Konfirmasi harga saat transaksi; data harian bukan sinyal real-time.']
     else:
         lines += ['Alasan:'] + [f'• {reason}' for reason in result['reasons']]
+    if result.get('warnings'):
+        lines += ['Catatan data:'] + [f'• {warning}' for warning in result['warnings']]
     lines += ['Konfirmasi = aturan bot, bukan jaminan harga naik.']
     return '\n'.join(lines)
 
