@@ -64,22 +64,22 @@ class BrokerYtdMatrixTests(unittest.TestCase):
     def test_ticker_has_sorted_buy_sell_and_correct_totals(self):
         reply = matrix.format_ticker_top("BBRI", self.db_path, "2026-10-14")
         self.assertIn("TOP 3 NET BUY", reply)
-        self.assertIn("1. NI | +Rp 10,000", reply)
-        self.assertIn("2. CC | +Rp 2,500", reply)
-        self.assertIn("3. HY | +Rp 1,000", reply)
-        self.assertIn("Total Top 3: +Rp 13,500", reply)
-        self.assertIn("1. YP | -Rp 6,000", reply)
-        self.assertIn("Total Top 3: -Rp 6,000", reply)
+        self.assertIn("1. NI | +Rp 10.0 Rb", reply)
+        self.assertIn("2. CC | +Rp 2.5 Rb", reply)
+        self.assertIn("3. HY | +Rp 1.0 Rb", reply)
+        self.assertIn("Total Top 3: +Rp 13.5 Rb", reply)
+        self.assertIn("1. YP | -Rp 6.0 Rb", reply)
+        self.assertIn("Total Top 3: -Rp 6.0 Rb", reply)
         self.assertIn("PARTIAL", reply)
         self.assertNotIn("999,999", reply)
         self.assertIn("bukan posisi saham", reply)
 
     def test_broker_rank_all_cached_tickers_not_just_watchlist(self):
         reply = matrix.format_broker_top("NI", self.db_path, "2026-10-14")
-        self.assertIn("1. BBRI | +Rp 10,000", reply)
-        self.assertIn("2. BMRI | +Rp 2,000", reply)
-        self.assertIn("3. BBNI | +Rp 1,000", reply)
-        self.assertIn("Total Net BUY Top 3: +Rp 13,000", reply)
+        self.assertIn("1. BBRI | +Rp 10.0 Rb", reply)
+        self.assertIn("2. BMRI | +Rp 2.0 Rb", reply)
+        self.assertIn("3. BBNI | +Rp 1.0 Rb", reply)
+        self.assertIn("Total Net BUY Top 3: +Rp 13.0 Rb", reply)
         self.assertIn("Cakupan: 4 ticker", reply)
         self.assertIn("PARTIAL", reply)
 
@@ -87,9 +87,9 @@ class BrokerYtdMatrixTests(unittest.TestCase):
         reply = matrix.format_broker_top(
             "YP", self.db_path, "2026-10-14", mode="SELL"
         )
-        self.assertIn("1. TLKM | -Rp 8,000", reply)
-        self.assertIn("2. BBRI | -Rp 6,000", reply)
-        self.assertIn("Total Net SELL Top 3: -Rp 14,000", reply)
+        self.assertIn("1. TLKM | -Rp 8.0 Rb", reply)
+        self.assertIn("2. BBRI | -Rp 6.0 Rb", reply)
+        self.assertIn("Total Net SELL Top 3: -Rp 14.0 Rb", reply)
         self.assertIn(
             "Tidak ada Net BUY ZZ",
             matrix.format_broker_top("ZZ", self.db_path, "2026-10-14"),
