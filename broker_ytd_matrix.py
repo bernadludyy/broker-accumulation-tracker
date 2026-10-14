@@ -235,7 +235,7 @@ def format_broker_top(
     broker = broker.strip().upper()
     mode = mode.strip().upper()
     if not BROKER_PATTERN.fullmatch(broker) or mode not in {"BUY", "SELL"}:
-        return "❌ Format: CC NI TOP YTD atau CC NI TOP SELL YTD"
+        return "❌ Kode broker atau mode tidak valid. Format: CC NI TOP YTD atau CC NI TOP SELL YTD"
     start, end = _year_bounds(asof)
     try:
         with _read_db(db_path) as con:
