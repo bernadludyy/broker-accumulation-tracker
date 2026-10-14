@@ -36,6 +36,7 @@ from project_fabric.fundamental_intelligence import (
     format_fundamental_report,
 )
 from project_fabric.bot1_rank import format_bot1_rank
+from project_fabric.eod_refresh import EODNotReady, eod_status, refresh_eod, format_eod_reply
 from foreign_entry import evaluate_foreign_entry
 from entry_engine import (
     add_indicators,
@@ -4362,6 +4363,12 @@ SETUP RANK
 SETUP RANK 10
 → Pre-screen Fundamental + Teknikal + Smart Money Proxy. Broker dikonfirmasi terpisah lewat /refresh.
 
+/eod refresh
+→ Ambil dan arsipkan EOD hari ini setelah 17.00 WIB (maksimum 1 request ZAPI jika belum lengkap).
+
+/eod status
+→ Cek kesiapan EOD Neon tanpa ZAPI.
+
 🧠 UNIVERSE SMART V2 (cache Neon, tanpa ZAPI tambahan)
 BOT1 SMART ADRO
 → Net broker 5D/20D + penilaian dan risiko Universe.
@@ -4824,6 +4831,20 @@ def command_result(text: str, chat_id: str) -> str:
         if len(parts) < 3:
             return "Format: BOT1 SMART TICKER"
         return format_bot1_smart(parts[2])
+
+    if first_lower in {"/eod", "eod"}:
+        if not authorized(chat_id):
+            return "⛔ Command EOD hanya tersedia untuk chat pribadi pemilik bot."
+        if len(parts) != 2 or parts[1].lower() not in {"refresh", "status"}:
+            return "Format: /eod refresh atau /eod status"
+        try:
+            result = refresh_eod() if parts[1].lower() == "refresh" else eod_status()
+            return format_eod_reply(result)
+        except EODNotReady as exc:
+            return f"⌛ EOD sumber belum siap: {exc}. Coba lagi nanti; data lama tidak diubah."
+        except Exception as exc:
+            print(f"[EOD-REFRESH-ERROR] {type(exc).__name__}: {exc}", file=sys.stderr)
+            return "❌ EOD refresh gagal. Periksa log GitHub Actions Bot 1; arsip lama tetap dipertahankan."
 
     if first_lower in {"/setuprank", "setuprank"}:
         limit = next((int(p) for p in parts[1:] if p.isdigit()), 10)
