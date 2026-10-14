@@ -4,6 +4,7 @@ from unittest.mock import patch
 import pandas as pd
 
 import foreign_entry as feature
+import entry_engine
 
 
 def history(open_price=100):
@@ -55,6 +56,18 @@ class ZeroOpenRegressionTests(unittest.TestCase):
         self.assertTrue(result["foreign"]["confirmed"])
         self.assertIn("HLCV tidak valid", result["reasons"][-1])
         build.assert_not_called()
+
+    def test_provider_zero_range_non_trading_rows_are_filtered(self):
+        valid = history(open_price=0).to_dict("records")
+        no_trade = [{
+            "date": "2026-09-16", "open": 0, "high": 0, "low": 0,
+            "close": 560, "volume": 0,
+        }]
+        with patch.object(entry_engine.tracker, "fetch_stock_history",
+                          return_value={"items": no_trade + valid}):
+            result = entry_engine.load_stock_history("PACK", 100)
+        self.assertEqual(len(result), 60)
+        self.assertTrue((result[["high", "low", "close"]] > 0).all().all())
 
 
 if __name__ == "__main__":
