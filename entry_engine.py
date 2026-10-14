@@ -29,8 +29,21 @@ def load_stock_history(ticker: str, length: int = 100) -> pd.DataFrame:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
+    df = df.dropna(subset=["date", "open", "high", "low", "close"])
+
+    # The provider may include exchange dates with no trade as zero-range rows
+    # (high=low=volume=0 while close carries the previous price). They are not
+    # candles and must not invalidate otherwise complete trading history.
+    valid_hlcv = (
+        (df["high"] > 0)
+        & (df["low"] > 0)
+        & (df["close"] > 0)
+        & (df["volume"] >= 0)
+        & (df["high"] >= df[["low", "close"]].max(axis=1))
+        & (df["low"] <= df[["high", "close"]].min(axis=1))
+    )
     df = (
-        df.dropna(subset=["date", "open", "high", "low", "close"])
+        df.loc[valid_hlcv]
         .sort_values("date")
         .drop_duplicates(subset=["date"], keep="last")
         .reset_index(drop=True)
