@@ -92,14 +92,25 @@ class MarketArchive:
                     source_service TEXT NOT NULL,
                     PRIMARY KEY(trade_date,ticker,schema_version))""")
 
-    def save_summary(self, payload: Any) -> int:
+    def save_summary(self, payload: Any, *, completed_through: str | None = None,
+                     asof: datetime | None = None) -> int:
         """Only archive completed dates. During today's session keep live in cache."""
-        today = datetime.now(WIB).date()
+        now = (asof or datetime.now(WIB)).astimezone(WIB)
+        today = now.date()
+        eod = date.fromisoformat(completed_through) if completed_through else None
+        if eod and (eod > today or (eod == today and (now.hour, now.minute) < (17, 0))):
+            raise ValueError("Completed EOD session is not available before 17:00 WIB")
         prepared = []
         for row in _items(payload):
             ticker = str(row.get("StockCode") or row.get("stockCode") or row.get("ticker") or row.get("code") or "").strip().upper()
             stamp = _session_date(row, history=False)
-            if not _CODE.fullmatch(ticker) or not stamp or stamp >= today:
+            if not _CODE.fullmatch(ticker) or not stamp:
+                if eod:
+                    raise ValueError("Invalid ticker/date in completed EOD snapshot")
+                continue
+            if eod and stamp != eod:
+                raise ValueError("Source date does not match completed EOD session")
+            if not eod and stamp >= today:
                 continue
             prepared.append((stamp, ticker,
                 _num(row, "OpenPrice", "Open", "open"),
@@ -121,14 +132,27 @@ class MarketArchive:
                 latest_day = max(x[0] for x in prepared)
                 c.execute("SELECT count(*) FROM project_fabric.stock_summary_daily WHERE trade_date=%s",
                           (latest_day,))
-                if int(c.fetchone()[0]) >= len({x[1] for x in prepared if x[0] == latest_day}):
+                if not eod and int(c.fetchone()[0]) >= len({x[1] for x in prepared if x[0] == latest_day}):
                     return 0
-                c.executemany("""INSERT INTO project_fabric.stock_summary_daily
+                conflict = "DO NOTHING"
+                if eod:
+                    # Only explicit validated post-close EOD can replace a same-day row.
+                    conflict = """DO UPDATE SET
+                        open_price=EXCLUDED.open_price, high_price=EXCLUDED.high_price,
+                        low_price=EXCLUDED.low_price, close_price=EXCLUDED.close_price,
+                        volume_shares=EXCLUDED.volume_shares, turnover_idr=EXCLUDED.turnover_idr,
+                        frequency=EXCLUDED.frequency,
+                        foreign_buy_value_idr=EXCLUDED.foreign_buy_value_idr,
+                        foreign_sell_value_idr=EXCLUDED.foreign_sell_value_idr,
+                        raw_json=EXCLUDED.raw_json, source_service=EXCLUDED.source_service,
+                        captured_at=now()"""
+                with cn.transaction():
+                    c.executemany("""INSERT INTO project_fabric.stock_summary_daily
                     (trade_date,ticker,open_price,high_price,low_price,close_price,
                      volume_shares,turnover_idr,frequency,foreign_buy_value_idr,
                      foreign_sell_value_idr,raw_json,source_service)
                     VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                    ON CONFLICT(trade_date,ticker) DO NOTHING""", prepared)
+                    ON CONFLICT(trade_date,ticker) """ + conflict, prepared)
         return len(prepared)
 
     def save_history(self, ticker: str, payload: Any) -> int:
