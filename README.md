@@ -259,3 +259,41 @@ maksimal 10 saham dengan skor tertinggi; error tidak dianggap sinyal kosong.
 Bot 2 terpisah tidak diubah. Tidak menambah jadwal kiriman maupun auto-order.
 Belum diverifikasi dengan payload API live; validasi ketat bisa menahan hasil
 jika upstream tidak menyediakan field tanggal atau nilai yang diperlukan.
+
+
+## Broker YTD Matrix — Top 3 dua arah (Telegram)
+
+Perintah baru Bot 1 (read-only, memakai \`broker_tracker.db\`):
+
+| Command | Hasil |
+| --- | --- |
+| \`BROKER TOP BBRI YTD\` | 3 broker net-buy terbesar dan 3 broker net-sell terbesar di BBRI sepanjang tahun berjalan, total nominal dan kontribusi broker |
+| \`CC NI TOP YTD\` | 3 saham dengan net-buy value terbesar oleh broker NI sepanjang YTD |
+| \`CC NI TOP SELL YTD\` | 3 saham dengan net-sell value terbesar oleh broker NI sepanjang YTD |
+
+Hitungan: \`net_value = SUM(BUY.value) - SUM(SELL.value)\` per pasangan saham–broker,
+dengan satuan rupiah dan periode Januari 1 sampai tanggal terakhir yang aman
+(\`safe_end_date\` Bot 1). Top Buy hanya nilai **positif**, Top Sell hanya nilai
+**negatif**. Total Top 3 adalah penjumlahan nilai net masing-masing anggota
+ranking, **bukan** penjumlahan gross buy. Ties diurutkan berdasarkan kode.
+
+Ranking berangkat dari **semua ticker yang sudah ada di \`broker_daily\`**, bukan
+hanya watchlist, dan **bukan** seluruh ticker IDX kecuali data seluruh ticker
+sudah dikoleksi. Cakupan YTD ditampilkan terhadap tanggal referensi yang
+*terlihat di cache*, termasuk snapshot EOD lokal jika ada; referensi tersebut
+bukan kalender perdagangan resmi. Status \`PARTIAL\` menandakan gap/stale/awal
+tahun tidak tercakup; \`UNVERIFIED\` bukan klaim data lengkap.
+
+Dataset broker-summary upstream hanya menampilkan broker teratas sehingga
+broker yang tidak muncul di suatu snapshot **tidak otomatis berarti nol transaksi**.
+Akumulasi YTD **tidak setara** posisi saham yang masih disimpan broker.
+Command tidak membaca atau menyinkronkan data broker dari Neon secara implisit;
+arsip EOD \`stock-summary\` Neon saja tidak cukup untuk menghasilkan broker
+history YTD. Jika data kosong, periksa \`/status TICKER\` dan pertimbangkan
+\`/refresh TICKER\` (perintah refresh dapat memakai kuota ZAPI).
+
+Pengiriman command baru dilewatkan melalui \`broker_ytd_dispatch.py\` di
+workflow \`telegram_query.yml\`; command existing tetap memakai handler lama,
+termasuk authorization dan de-duplication. Query Top 3 sendiri tidak membuat
+request ZAPI maupun jadwal scanning tambahan. Setiap command Telegram tetap
+menggunakan satu run GitHub Actions seperti perintah Bot 1 lainnya.
