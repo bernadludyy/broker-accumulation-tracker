@@ -58,7 +58,7 @@ jobs:
 
       - name: Process Telegram repository_dispatch
         if: github.event_name == 'repository_dispatch'
-        run: python telegram_query_bot.py --event-file "$GITHUB_EVENT_PATH"
+        run: python broker_ytd_dispatch.py --event-file "$GITHUB_EVENT_PATH"
 
       - name: Manual query test
         if: github.event_name == 'workflow_dispatch'
@@ -67,9 +67,9 @@ jobs:
           MANUAL_CHAT_ID: ${{ inputs.chat_id }}
         run: |
           if [ -n "$MANUAL_CHAT_ID" ]; then
-            python telegram_query_bot.py --text "$MANUAL_TEXT" --chat-id "$MANUAL_CHAT_ID"
+            python broker_ytd_dispatch.py --text "$MANUAL_TEXT" --chat-id "$MANUAL_CHAT_ID"
           else
-            python telegram_query_bot.py --text "$MANUAL_TEXT"
+            python broker_ytd_dispatch.py --text "$MANUAL_TEXT"
           fi
 
       - name: Flush SQLite WAL
