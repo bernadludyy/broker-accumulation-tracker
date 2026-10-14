@@ -14,12 +14,11 @@ from zoneinfo import ZoneInfo
 
 from .data_gateway import CachePolicy, DataGateway
 from .market_archive import MarketArchive
-from .postgres_backend import configured_database_url
 from .universe_intelligence import _items
 
 WIB = ZoneInfo("Asia/Jakarta")
 MIN_ROWS = 500
-_MIN_PREVIOUS_COVERAGE = 0.95
+_MIN_PREVIOUS_COVERAGE = 0.99
 _CODE = re.compile(r"^[A-Z0-9]{1,15}$")
 
 
@@ -81,7 +80,7 @@ def _validate(payload: Any, target: date, minimum: int) -> int:
 def refresh_eod(*, asof: datetime | None = None,
                 archive: MarketArchive | None = None,
                 gateway: DataGateway | None = None) -> dict[str, Any]:
-    """Idempotent manual refresh after 17:00 WIB, at most one fresh ZAPI request."""
+    """Idempotent manual refresh after 17:00 WIB; normally one ZAPI fetch."""
     now = (asof or datetime.now(WIB)).astimezone(WIB)
     target = now.date()
     if now.weekday() >= 5:
