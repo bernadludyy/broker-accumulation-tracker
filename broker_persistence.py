@@ -9,7 +9,21 @@ import math
 import sqlite3
 from datetime import date, timedelta
 
-from broker_ytd_matrix import TICKER_PATTERN, _read_db, _reference_dates, rupiah
+from broker_ytd_matrix import (
+    BROKER_PATTERN,
+    TICKER_PATTERN,
+    _read_db,
+    _reference_dates,
+    rupiah,
+)
+
+
+def _finite_number(value: object) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
 
 
 def analyze_persistence(ticker: str, db_path: str, asof: str) -> dict:
@@ -21,20 +35,74 @@ def analyze_persistence(ticker: str, db_path: str, asof: str) -> dict:
     with _read_db(db_path) as con:
         dates = sorted(_reference_dates(con, start, end.isoformat()))[-20:]
         if not dates:
-            return dict(ticker=ticker, asof=asof, dates=[], brokers=[])
+            return dict(
+                ticker=ticker,
+                asof=asof,
+                dates=[],
+                brokers=[],
+                invalid_rows=0,
+                invalid_dates=[],
+            )
         # One bounded cache query, including YTD only for this ticker.
         lower = min(dates[0], f'{end.year}-01-01')
-        rows = con.execute('SELECT trade_date,broker,side,value FROM broker_daily '
-                           'WHERE ticker=? AND trade_date BETWEEN ? AND ?',
-                           (ticker, lower, asof)).fetchall()
-        daily, ytd = {}, {}
+        columns = {
+            str(row['name'])
+            for row in con.execute('PRAGMA table_info(broker_daily)')
+        }
+        optional = [name for name in ('lots', 'avg_price') if name in columns]
+        select_columns = ','.join(
+            ['trade_date', 'broker', 'side', 'value', *optional]
+        )
+        rows = con.execute(
+            f'SELECT {select_columns} FROM broker_daily '
+            'WHERE ticker=? AND trade_date BETWEEN ? AND ?',
+            (ticker, lower, asof),
+        ).fetchall()
+
+        # Old databases can contain malformed rows that predate the atomic
+        # snapshot validator. Quarantine the entire broker-day if one side is
+        # invalid; keeping the other side alone would fabricate a daily net.
+        staged: dict[tuple[str, str], float] = {}
+        invalid_keys: set[tuple[str, str]] = set()
+        invalid_dates: set[str] = set()
+        invalid_rows = 0
         for r in rows:
-            amount = float(r['value']) if r['value'] is not None else float('nan')
-            if not math.isfinite(amount) or amount < 0 or r['side'] not in ('BUY','SELL'):
-                raise ValueError('Nilai broker cache tidak valid')
+            code = str(r['broker'] or '').strip().upper()
+            day = str(r['trade_date'] or '')
+            side = r['side']
+            amount = _finite_number(r['value'])
+            lots = _finite_number(r['lots']) if 'lots' in optional else None
+            average = (
+                _finite_number(r['avg_price'])
+                if 'avg_price' in optional and r['avg_price'] is not None
+                else None
+            )
+            invalid = (
+                not BROKER_PATTERN.fullmatch(code)
+                or side not in ('BUY', 'SELL')
+                or amount is None
+                or amount < 0
+                or ('lots' in optional and (
+                    lots is None or lots < 0 or lots != int(lots)
+                ))
+                or ('avg_price' in optional and r['avg_price'] is not None and (
+                    average is None or average < 0
+                ))
+            )
+            if invalid:
+                invalid_rows += 1
+                invalid_dates.add(day)
+                invalid_keys.add((code, day))
+                continue
             signed = amount if r['side'] == 'BUY' else -amount
-            code, day = r['broker'], r['trade_date']
-            daily.setdefault(code, {})[day] = daily.get(code, {}).get(day, 0) + signed
+            staged[(code, day)] = staged.get((code, day), 0) + signed
+
+        daily: dict[str, dict[str, float]] = {}
+        ytd: dict[str, float] = {}
+        for (code, day), signed in staged.items():
+            if (code, day) in invalid_keys:
+                continue
+            daily.setdefault(code, {})[day] = signed
             if day >= f'{end.year}-01-01':
                 ytd[code] = ytd.get(code, 0) + signed
         turnover = {}
@@ -53,24 +121,48 @@ def analyze_persistence(ticker: str, db_path: str, asof: str) -> dict:
             window = dates[-n:]
             seen = [values[d] for d in window if d in values]
             unknown = len(window) - len(seen)
+            invalid_in_window = sum(
+                (code, day) in invalid_keys for day in window
+            )
             trailing = 0
             for d in reversed(window):
                 if d not in values or values[d] <= 0:
                     break
                 trailing += 1
             net = sum(seen)
-            complete = len(window) == n and unknown == 0 and dates[-1] == asof
+            complete = (
+                len(window) == n
+                and unknown == 0
+                and invalid_in_window == 0
+                and dates[-1] == asof
+            )
             denominator = sum(turnover.get(d, 0) for d in window)
             intensity = (100 * net / denominator if complete and
                          all(d in turnover for d in window) and denominator > 0 else None)
             windows[n] = dict(buy_days=sum(v > 0 for v in seen), sell_days=sum(v < 0 for v in seen),
                               neutral_days=sum(v == 0 for v in seen), unknown_days=unknown,
                               observed_days=len(seen), reference_days=len(window),
-                              trailing_buy_days=trailing, net_value=net, intensity_pct=intensity,
-                              status='UNVERIFIED' if complete else 'PARTIAL')
-        brokers.append(dict(code=code, windows=windows, ytd_net_value=ytd.get(code, 0)))
+                              trailing_buy_days=trailing, net_value=net,
+                              intensity_pct=intensity,
+                              invalid_rows=invalid_in_window,
+                              status=('UNVERIFIED' if complete else
+                                      'PARTIAL/DATA QUALITY' if invalid_in_window else
+                                      'PARTIAL'))
+        brokers.append(dict(
+            code=code,
+            windows=windows,
+            ytd_net_value=ytd.get(code, 0),
+            ytd_invalid_rows=sum(key[0] == code for key in invalid_keys),
+        ))
     brokers.sort(key=lambda b: (-b['windows'][20]['net_value'], b['code']))
-    return dict(ticker=ticker, asof=asof, dates=dates, brokers=brokers)
+    return dict(
+        ticker=ticker,
+        asof=asof,
+        dates=dates,
+        brokers=brokers,
+        invalid_rows=invalid_rows,
+        invalid_dates=sorted(invalid_dates),
+    )
 
 
 def format_persistence(ticker: str, db_path: str, asof: str) -> str:
@@ -86,11 +178,20 @@ def format_persistence(ticker: str, db_path: str, asof: str) -> str:
     lines.append(f"Referensi cache: {report['dates'][0]} s.d. {report['dates'][-1]}")
     if report['dates'][-1] != asof:
         lines.append('STALE: tanggal terakhir cache berbeda dari acuan.')
+    if report['invalid_rows']:
+        lines.append(
+            f"DATA QUALITY: {report['invalid_rows']} baris legacy dikecualikan "
+            f"({len(report['invalid_dates'])} tanggal); hasil YTD PARTIAL."
+        )
     selected = [b for b in report['brokers'] if b['windows'][20]['net_value'] > 0][:3]
     if not selected:
         lines.append('Tidak ada broker dengan net buy terlihat positif pada jendela 20 sesi cache.')
     for b in selected:
-        lines += ['', f"{b['code']} | YTD terlihat {rupiah(b['ytd_net_value'])}"]
+        ytd_quality = ' | YTD PARTIAL' if b['ytd_invalid_rows'] else ''
+        lines += [
+            '',
+            f"{b['code']} | YTD terlihat {rupiah(b['ytd_net_value'])}{ytd_quality}",
+        ]
         for n, w in b['windows'].items():
             intensity = f"{w['intensity_pct']:+.2f}%" if w['intensity_pct'] is not None else 'N/A'
             lines += [f"{n} sesi: NB {w['buy_days']}/{n}, NS {w['sell_days']}, netral {w['neutral_days']} | {w['status']}",

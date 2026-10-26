@@ -65,7 +65,40 @@ class PersistenceTests(unittest.TestCase):
             self.assertIn('PERSISTENSI', d.command_result('BROKER PERSIST ABCD', '123'))
             self.assertIn('Format:', d.command_result('BROKER PERSIST ABCD EXTRA', '123'))
 
-    def test_invalid_values_fail_closed(self):
+    def test_invalid_legacy_rows_are_quarantined_and_reported(self):
         with sqlite3.connect(self.path) as c:
-            c.execute("UPDATE broker_daily SET value=-1 WHERE trade_date='2026-10-09'")
-        self.assertIn('tidak valid', format_persistence('ABCD', self.path, '2026-10-09'))
+            c.execute(
+                "INSERT INTO broker_daily VALUES"
+                "('2026-07-08','ABCD','SH','SELL',-32000)"
+            )
+        report = analyze_persistence('ABCD', self.path, '2026-10-09')
+        self.assertEqual(report['invalid_rows'], 1)
+        self.assertEqual(report['invalid_dates'], ['2026-07-08'])
+        self.assertEqual(report['brokers'][0]['ytd_net_value'], 1200)
+        message = format_persistence('ABCD', self.path, '2026-10-09')
+        self.assertIn('DATA QUALITY: 1 baris legacy dikecualikan', message)
+        self.assertIn('YTD PARTIAL', message)
+
+    def test_invalid_row_in_recent_window_marks_affected_window_partial(self):
+        with sqlite3.connect(self.path) as c:
+            c.execute(
+                "UPDATE broker_daily SET value=-1 "
+                "WHERE trade_date='2026-10-09' AND side='SELL'"
+            )
+        report = analyze_persistence('ABCD', self.path, '2026-10-09')
+        ni = report['brokers'][0]
+        self.assertEqual(ni['windows'][5]['invalid_rows'], 1)
+        self.assertEqual(ni['windows'][5]['status'], 'PARTIAL/DATA QUALITY')
+        self.assertIsNone(ni['windows'][5]['intensity_pct'])
+
+    def test_invalid_lots_or_average_are_quarantined_when_columns_exist(self):
+        with sqlite3.connect(self.path) as c:
+            c.execute('ALTER TABLE broker_daily ADD COLUMN lots INTEGER')
+            c.execute('ALTER TABLE broker_daily ADD COLUMN avg_price REAL')
+            c.execute('UPDATE broker_daily SET lots=10, avg_price=100')
+            c.execute(
+                "UPDATE broker_daily SET lots=-1, avg_price=-100 "
+                "WHERE trade_date='2026-10-09' AND side='SELL'"
+            )
+        report = analyze_persistence('ABCD', self.path, '2026-10-09')
+        self.assertEqual(report['invalid_rows'], 1)
