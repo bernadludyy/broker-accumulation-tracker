@@ -330,3 +330,9 @@ tersedia. Fitur ini terinspirasi penelitian persistensi order flow Tóth dkk.
 (2015), tetapi merupakan adaptasi harian dan bukan replikasi penelitian intraday.
 Command hanya membaca cache: tidak menambah panggilan ZAPI, jadwal, skor entry,
 atau pengiriman otomatis.
+
+Baris historis legacy yang memiliki nilai, lot, atau average price negatif/tidak
+valid dikarantina saat membaca. Seluruh pasangan broker-tanggal yang terdampak
+dikeluarkan agar sisi transaksi yang tersisa tidak menciptakan net palsu. Laporan
+tetap ditampilkan dengan peringatan `DATA QUALITY` dan `YTD PARTIAL`; command
+tidak mengubah atau menghapus database sumber.
