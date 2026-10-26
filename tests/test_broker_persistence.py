@@ -37,7 +37,7 @@ class PersistenceTests(unittest.TestCase):
         self.assertAlmostEqual(w['intensity_pct'], 6)
         self.assertEqual(ni['ytd_net_value'], 1200)
         self.assertEqual(ni['windows'][10]['status'], 'PARTIAL')
-        self.assertIn('4/5', format_persistence('ABCD', self.path, '2026-10-09'))
+        self.assertIn('5 sesi: NB 4 | NS 1', format_persistence('ABCD', self.path, '2026-10-09'))
 
     def test_absent_broker_is_unknown_and_breaks_streak(self):
         with sqlite3.connect(self.path) as c:
@@ -102,3 +102,24 @@ class PersistenceTests(unittest.TestCase):
             )
         report = analyze_persistence('ABCD', self.path, '2026-10-09')
         self.assertEqual(report['invalid_rows'], 1)
+
+    def test_weighted_average_buy_price_and_simple_output(self):
+        with sqlite3.connect(self.path) as c:
+            c.execute('ALTER TABLE broker_daily ADD COLUMN lots INTEGER')
+            c.execute('ALTER TABLE broker_daily ADD COLUMN avg_price REAL')
+            c.execute(
+                "UPDATE broker_daily SET value=10000, lots=1, avg_price=100 "
+                "WHERE side='BUY'"
+            )
+            c.execute(
+                "UPDATE broker_daily SET value=20000, lots=2, avg_price=100 "
+                "WHERE side='SELL'"
+            )
+        report = analyze_persistence('ABCD', self.path, '2026-10-09')
+        ni = report['brokers'][0]
+        self.assertEqual(ni['ytd_avg_buy_price'], 100)
+        self.assertEqual(ni['windows'][5]['avg_buy_price'], 100)
+        message = format_persistence('ABCD', self.path, '2026-10-09')
+        self.assertIn('Avg Buy Rp 100', message)
+        self.assertIn('Arti singkat:', message)
+        self.assertNotIn('intensitas', message.lower())

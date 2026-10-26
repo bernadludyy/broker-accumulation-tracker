@@ -336,3 +336,9 @@ valid dikarantina saat membaca. Seluruh pasangan broker-tanggal yang terdampak
 dikeluarkan agar sisi transaksi yang tersisa tidak menciptakan net palsu. Laporan
 tetap ditampilkan dengan peringatan `DATA QUALITY` dan `YTD PARTIAL`; command
 tidak mengubah atau menghapus database sumber.
+
+Output `BROKER PERSIST` menampilkan `Avg Buy` YTD dan 5/10/20 sesi. Nilainya
+adalah weighted average harga beli yang terlihat (`buy value / buy lots / 100`),
+bukan harga modal dari posisi saham yang masih dimiliki broker. Ringkasan
+Telegram dibuat singkat: hari net buy/net sell, net value, Avg Buy, cakupan data,
+dan status kualitas.
