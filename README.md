@@ -315,3 +315,18 @@ workflow `telegram_query.yml`; command existing tetap memakai handler lama,
 termasuk authorization dan de-duplication. Query Top 3 sendiri tidak membuat
 request ZAPI maupun jadwal scanning tambahan. Setiap command Telegram tetap
 menggunakan satu run GitHub Actions seperti perintah Bot 1 lainnya.
+
+## Persistensi broker 5/10/20 sesi
+
+Command `BROKER PERSIST BBRI` membaca cache SQLite dan menampilkan maksimal tiga
+broker net buy terbesar pada jendela 20 sesi, beserta jumlah hari net buy/net
+sell, rentetan net buy terakhir, net value, perbandingan aktivitas terbaru dengan
+YTD, dan intensitas terhadap nilai transaksi saham pada tanggal yang sama.
+
+Broker yang tidak muncul pada broker summary harian diperlakukan sebagai data
+tidak diketahui, bukan nol transaksi. Jendela yang kurang lengkap diberi status
+`PARTIAL`, sedangkan intensitas hanya dihitung jika seluruh tanggal dan turnover
+tersedia. Fitur ini terinspirasi penelitian persistensi order flow Tóth dkk.
+(2015), tetapi merupakan adaptasi harian dan bukan replikasi penelitian intraday.
+Command hanya membaca cache: tidak menambah panggilan ZAPI, jadwal, skor entry,
+atau pengiriman otomatis.

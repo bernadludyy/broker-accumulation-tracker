@@ -7,10 +7,13 @@ from __future__ import annotations
 
 import telegram_query_bot as legacy
 from broker_ytd_matrix import format_broker_top, format_ticker_top
+from broker_persistence import format_persistence
 
 
 _HELP = """
 🏆 BROKER YTD MATRIX (hanya cache SQLite, 0 extra ZAPI)
+BROKER PERSIST BBRI
+→ Persistensi broker 5/10/20 sesi cache, net buy terkini vs YTD, intensitas.
 BROKER TOP BBRI YTD
 → Top 3 broker Net Buy + Net Sell untuk satu saham.
 CC NI TOP YTD
@@ -33,6 +36,11 @@ def command_result(text: str, chat_id: str) -> str:
         return _original_command_result(text, chat_id)
 
     first = parts[0].split("@")[0].lower()
+    if first == "broker" and len(parts) >= 2 and parts[1].upper() == "PERSIST":
+        if len(parts) != 3:
+            return "Format: BROKER PERSIST BBRI"
+        return format_persistence(parts[2], str(legacy.DB_PATH), legacy.safe_end_date())
+
     if first == "broker" and len(parts) >= 2 and parts[1].upper() == "TOP":
         if len(parts) not in (3, 4) or (
             len(parts) == 4 and parts[3].upper() != "YTD"
