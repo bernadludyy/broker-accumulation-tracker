@@ -159,6 +159,25 @@ class MarketComboTests(unittest.TestCase):
         self.assertIn("EOD BELUM TERBARU", text)
         self.assertIn("target 2026-10-27", text)
 
+    def test_eod_output_uses_clear_indonesian_units(self):
+        rows = [market_row("BUMI", 2_880_000_000, 381_440_000_000, 43_317)]
+        with patch.object(
+            combos, "load_cached_market",
+            return_value=(rows, "2026-10-27", "TEST EOD CACHE"),
+        ):
+            text = combos.format_market_combo(
+                2,
+                mode="EOD",
+                now=datetime(
+                    2026, 10, 27, 18, 0, tzinfo=ZoneInfo("Asia/Jakarta")
+                ),
+            )
+
+        self.assertIn("2,88 miliar lembar", text)
+        self.assertIn("43.317 kali", text)
+        self.assertIn("Rp381,44 miliar", text)
+        self.assertNotIn("2.88 M saham", text)
+
     def test_command_routes_combo2_and_combo1(self):
         with patch.object(dispatcher, "format_market_combo", return_value="OK") as formatter:
             self.assertEqual(dispatcher.command_result("MARKET COMBO 2", "1"), "OK")
