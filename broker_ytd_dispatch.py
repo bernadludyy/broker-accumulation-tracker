@@ -17,11 +17,15 @@ _HELP = """
 BROKER STALKER
 BROKER STALKER 10D 6
 → Saham yang net buy oleh banyak broker; default 5 sesi, maksimal 10 hasil.
-MARKET COMBO 2
-→ Top Volume ∩ Top Frequency, lalu konfirmasi bid/offer live (prioritas pertama).
-MARKET COMBO 1
+MARKET COMBO 2 LIVE
+→ Top Volume ∩ Top Frequency, lalu konfirmasi bid/offer saat bursa berjalan.
+MARKET COMBO 2 EOD
+→ Watchlist Volume + Frequency dari cache EOD; 0 ZAPI/orderbook.
+MARKET COMBO 1 LIVE
 → High ATS satu hari + bid/offer live; market cap tidak difilter.
-→ Opsional limit: MARKET COMBO 2 5 atau MARKET COMBO 1 5.
+MARKET COMBO 1 EOD
+→ Watchlist High ATS dari cache EOD; 0 ZAPI/orderbook.
+→ Opsional limit 1–10. Tanpa LIVE/EOD tetap memakai LIVE.
 BROKER PERSIST BBRI
 → Persistensi broker 5/10/20 sesi cache, net buy terkini vs YTD, intensitas.
 BROKER TOP BBRI YTD
@@ -47,14 +51,28 @@ def command_result(text: str, chat_id: str) -> str:
 
     first = parts[0].split("@")[0].lower()
     if first == "market" and len(parts) >= 2 and parts[1].upper() == "COMBO":
-        if len(parts) not in {3, 4} or parts[2] not in {"1", "2"}:
-            return "Format: MARKET COMBO [1|2] [1-10]"
+        format_hint = "Format: MARKET COMBO [1|2] [LIVE|EOD] [1-10]"
+        if len(parts) not in {3, 4, 5} or parts[2] not in {"1", "2"}:
+            return format_hint
         limit = 5
-        if len(parts) == 4:
-            if not parts[3].isdigit() or not 1 <= int(parts[3]) <= 10:
-                return "Format: MARKET COMBO [1|2] [1-10]"
-            limit = int(parts[3])
-        return format_market_combo(int(parts[2]), limit=limit)
+        mode = "LIVE"
+        mode_seen = False
+        limit_seen = False
+        for option in parts[3:]:
+            upper = option.upper()
+            if upper in {"LIVE", "EOD"}:
+                if mode_seen:
+                    return format_hint
+                mode = upper
+                mode_seen = True
+            elif option.isdigit() and 1 <= int(option) <= 10:
+                if limit_seen:
+                    return format_hint
+                limit = int(option)
+                limit_seen = True
+            else:
+                return format_hint
+        return format_market_combo(int(parts[2]), limit=limit, mode=mode)
 
     is_stalker = (
         (first == "broker" and len(parts) >= 2 and parts[1].upper() == "STALKER")

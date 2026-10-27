@@ -102,6 +102,28 @@ class CacheCommandTests(unittest.TestCase):
             _, day, _ = cc.load_cached_market(now=now)
         self.assertEqual(day, '2026-10-12')
 
+    def test_completed_only_excludes_active_session_cache(self):
+        now = datetime(2026, 10, 13, 14, 0, tzinfo=WIB)
+        active = [dict(row, Date="2026-10-13") for row in market_rows()]
+        previous = market_rows()
+        with patch.object(
+            cc, "_load_archived_market", return_value=None
+        ), patch.object(
+            cc.tracker, "latest_stock_summary_snapshot_date", return_value="2026-10-12"
+        ), patch.object(
+            cc.tracker, "load_stock_summary_snapshot", return_value=previous
+        ), patch.object(
+            cc.tracker, "peek_shared_stock_summary", return_value={"data": active}
+        ):
+            rows, day, source = cc.load_cached_market(
+                now=now,
+                completed_only=True,
+            )
+
+        self.assertEqual(day, "2026-10-12")
+        self.assertEqual(rows, previous)
+        self.assertEqual(source, "LATEST DAILY DATABASE SNAPSHOT")
+
     def test_stale_warning_after_cutoff(self):
         now = datetime(2026, 10, 13, 17, 42, tzinfo=WIB)
         self.assertIn('EOD BELUM TERBARU', cc._market_freshness('2026-10-12', now))

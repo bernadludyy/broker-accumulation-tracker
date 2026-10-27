@@ -122,13 +122,53 @@ class MarketComboTests(unittest.TestCase):
         self.assertIn("HANYA JAM BURSA", text)
         self.assertIn("Tidak ada request orderbook", text)
 
+    def test_eod_mode_is_available_offhours_without_orderbook(self):
+        rows = [market_row("AAAA", 1_000_000, 5_000_000_000, 10_000)]
+        with patch.object(
+            combos, "load_cached_market",
+            return_value=(rows, "2026-10-27", "TEST EOD CACHE"),
+        ) as loader, patch.object(
+            combos.tracker, "fetch_orderbook", side_effect=AssertionError("book")
+        ):
+            text = combos.format_market_combo(
+                2,
+                mode="EOD",
+                now=datetime(
+                    2026, 10, 27, 18, 0, tzinfo=ZoneInfo("Asia/Jakarta")
+                ),
+            )
+        loader.assert_called_once()
+        self.assertTrue(loader.call_args.kwargs["completed_only"])
+        self.assertIn("MARKET COMBO 2 EOD", text)
+        self.assertIn("ZAPI/orderbook: 0 request", text)
+        self.assertIn("MARKET COMBO 2 LIVE", text)
+
+    def test_eod_mode_warns_when_snapshot_is_stale(self):
+        rows = [market_row("AAAA", 1_000_000, 5_000_000_000, 10_000)]
+        with patch.object(
+            combos, "load_cached_market",
+            return_value=(rows, "2026-10-24", "TEST EOD CACHE"),
+        ):
+            text = combos.format_market_combo(
+                1,
+                mode="EOD",
+                now=datetime(
+                    2026, 10, 27, 18, 0, tzinfo=ZoneInfo("Asia/Jakarta")
+                ),
+            )
+        self.assertIn("EOD BELUM TERBARU", text)
+        self.assertIn("target 2026-10-27", text)
+
     def test_command_routes_combo2_and_combo1(self):
         with patch.object(dispatcher, "format_market_combo", return_value="OK") as formatter:
             self.assertEqual(dispatcher.command_result("MARKET COMBO 2", "1"), "OK")
-            formatter.assert_called_with(2, limit=5)
-            self.assertEqual(dispatcher.command_result("MARKET COMBO 1 3", "1"), "OK")
-            formatter.assert_called_with(1, limit=3)
+            formatter.assert_called_with(2, limit=5, mode="LIVE")
+            self.assertEqual(dispatcher.command_result("MARKET COMBO 1 EOD 3", "1"), "OK")
+            formatter.assert_called_with(1, limit=3, mode="EOD")
+            self.assertEqual(dispatcher.command_result("MARKET COMBO 2 4 LIVE", "1"), "OK")
+            formatter.assert_called_with(2, limit=4, mode="LIVE")
         self.assertIn("Format:", dispatcher.command_result("MARKET COMBO 3", "1"))
+        self.assertIn("Format:", dispatcher.command_result("MARKET COMBO 2 EOD LIVE", "1"))
         self.assertIn("MARKET COMBO 2", dispatcher.command_result("/help", "1"))
 
     def test_bad_market_data_fails_closed_before_orderbook(self):

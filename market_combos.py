@@ -1,8 +1,9 @@
-"""On-demand Bot 1 market combinations with bounded live orderbook calls.
+"""On-demand Bot 1 market combinations in LIVE and EOD modes.
 
 Stock-summary provides the broad, cache-friendly prefilter. Only the strongest
 shortlist is checked against live orderbook data, preventing an all-IDX
-orderbook fan-out. Thresholds are hypotheses, not backtested entry signals.
+orderbook fan-out. EOD mode is cache-only and deliberately omits orderbook
+confirmation. Thresholds are hypotheses, not backtested entry signals.
 """
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ from zoneinfo import ZoneInfo
 
 import tracker
 from bot2_entry import load_shared_live_market
+from cache_commands import _expected_eod_date, load_cached_market
 
 
 WIB = ZoneInfo("Asia/Jakarta")
@@ -202,16 +204,10 @@ def _fetch_books(
     return checked, sorted(errors)
 
 
-def analyze_market_combo(
-    kind: int,
-    rows: list[dict],
-    *,
-    fetcher: Callable[[str], Any] | None = None,
-) -> dict:
-    """Evaluate Combo 2 first, then Combo 1, using at most ten books."""
+def _prefilter_market(kind: int, rows: list[dict]) -> dict:
+    """Build the shared stock-summary shortlist without touching orderbook."""
     if kind not in {1, 2}:
         raise ValueError("Kombinasi harus 1 atau 2")
-    fetcher = fetcher or tracker.fetch_orderbook
     market = _normalize_market(rows)
     if not market:
         raise ValueError("Volume/value/frequency stock-summary tidak lengkap")
@@ -247,6 +243,26 @@ def analyze_market_combo(
         ]
         eligible.sort(key=lambda x: (-x["ats_value"], x["ticker"]))
 
+    return {
+        "kind": kind,
+        "market_count": len(market),
+        "eligible_count": len(eligible),
+        "ats_threshold": ats_threshold,
+        "eligible": eligible,
+    }
+
+
+def analyze_market_combo(
+    kind: int,
+    rows: list[dict],
+    *,
+    fetcher: Callable[[str], Any] | None = None,
+) -> dict:
+    """Evaluate a LIVE combo using at most ten orderbook requests."""
+    fetcher = fetcher or tracker.fetch_orderbook
+    prefilter = _prefilter_market(kind, rows)
+    eligible = prefilter["eligible"]
+
     shortlist = eligible[:PREFILTER_LIMIT]
     checked, errors = _fetch_books(shortlist, fetcher)
     selected = [
@@ -268,13 +284,25 @@ def analyze_market_combo(
         )
     return {
         "kind": kind,
-        "market_count": len(market),
-        "eligible_count": len(eligible),
+        "market_count": prefilter["market_count"],
+        "eligible_count": prefilter["eligible_count"],
         "checked_count": len(shortlist),
         "valid_books": len(checked),
         "errors": errors,
-        "ats_threshold": ats_threshold,
+        "ats_threshold": prefilter["ats_threshold"],
         "rows": selected,
+    }
+
+
+def analyze_market_combo_eod(kind: int, rows: list[dict]) -> dict:
+    """Evaluate the cache-only EOD watchlist without an orderbook request."""
+    prefilter = _prefilter_market(kind, rows)
+    return {
+        "kind": kind,
+        "market_count": prefilter["market_count"],
+        "eligible_count": prefilter["eligible_count"],
+        "ats_threshold": prefilter["ats_threshold"],
+        "rows": prefilter["eligible"],
     }
 
 
@@ -305,14 +333,14 @@ def _market_in_progress(now: datetime) -> bool:
     return 9 * 60 <= minute <= 15 * 60 + 50
 
 
-def format_market_combo(
+def _format_market_combo_live(
     kind: int,
     limit: int = 5,
     *,
     now: datetime | None = None,
 ) -> str:
     if kind not in {1, 2} or not 1 <= limit <= 10:
-        return "Format: MARKET COMBO [1|2] [1-10]"
+        return "Format: MARKET COMBO [1|2] [LIVE|EOD] [1-10]"
     now = (now or datetime.now(WIB)).astimezone(WIB)
     if not _market_in_progress(now):
         return (
@@ -388,3 +416,94 @@ def format_market_combo(
         "Bukan sinyal entry; konfirmasi momentum dan buyer flow melalui Bot 4.",
     ]
     return "\n".join(lines)
+
+
+def _format_market_combo_eod(
+    kind: int,
+    limit: int = 5,
+    *,
+    now: datetime | None = None,
+) -> str:
+    if kind not in {1, 2} or not 1 <= limit <= 10:
+        return "Format: MARKET COMBO [1|2] [LIVE|EOD] [1-10]"
+    now = (now or datetime.now(WIB)).astimezone(WIB)
+    try:
+        rows, day, source = load_cached_market(now=now, completed_only=True)
+        report = analyze_market_combo_eod(kind, rows)
+    except Exception as exc:
+        print(f"[MARKET-COMBO-EOD-ERROR] {type(exc).__name__}: {str(exc)[:200]}")
+        detail = str(exc) if isinstance(exc, ValueError) else "Cache EOD gagal dibaca; coba lagi."
+        return f"⏳ MARKET COMBO {kind} EOD — DATA BELUM VALID\n{detail}"
+
+    title = (
+        "🌙 MARKET COMBO 2 EOD — VOLUME + FREQUENCY"
+        if kind == 2
+        else "🌙 MARKET COMBO 1 EOD — HIGH ATS"
+    )
+    lines = [
+        title,
+        f"Snapshot: {day} | {source}",
+        f"Universe valid: {report['market_count']} | kandidat: {report['eligible_count']}",
+    ]
+    if kind == 2:
+        lines.append(f"Prefilter: Top {TOP_RANK} Volume ∩ Top {TOP_RANK} Frequency")
+    else:
+        lines.append(
+            f"Prefilter: ATS nilai/trx ≥ {_compact(report['ats_threshold'])} "
+            f"(P{COMBO1_ATS_PERCENTILE * 100:.0f})"
+        )
+        lines.append("Market cap: tidak difilter")
+
+    expected = _expected_eod_date(now)
+    if day < expected:
+        lines.append(
+            f"⚠️ EOD BELUM TERBARU — target {expected}, tersedia {day}."
+        )
+
+    selected = report["rows"][:limit]
+    lines.append("")
+    if not selected:
+        lines.append("Belum ada kandidat yang lolos prefilter EOD.")
+    for index, row in enumerate(selected, 1):
+        if kind == 2:
+            lines.append(
+                f"{index}. {row['ticker']} | Volume #{row['volume_rank']} "
+                f"({_compact(row['volume'], ' saham')})"
+            )
+            lines.append(
+                f"   Frequency #{row['frequency_rank']} ({row['frequency']:,}) "
+                f"| Value {_compact(row['value'])}"
+            )
+        else:
+            lines.append(
+                f"{index}. {row['ticker']} | ATS {_compact(row['ats_value'])}/trx "
+                f"| ≈{row['ats_lots']:,.1f} lot/trx"
+            )
+            lines.append(
+                f"   Frequency {row['frequency']:,} | Value {_compact(row['value'])}"
+            )
+
+    lines += [
+        "",
+        "ZAPI/orderbook: 0 request — seluruh data dari cache EOD.",
+        "⚠️ WATCHLIST SESI BERIKUTNYA, bukan sinyal entry.",
+        f"Saat bursa buka, konfirmasi dengan MARKET COMBO {kind} LIVE.",
+        "Konfirmasi momentum dan buyer flow melalui Bot 4.",
+    ]
+    return "\n".join(lines)
+
+
+def format_market_combo(
+    kind: int,
+    limit: int = 5,
+    *,
+    mode: str = "LIVE",
+    now: datetime | None = None,
+) -> str:
+    """Format one mode; legacy commands without a mode remain LIVE."""
+    normalized_mode = str(mode).strip().upper()
+    if normalized_mode == "LIVE":
+        return _format_market_combo_live(kind, limit=limit, now=now)
+    if normalized_mode == "EOD":
+        return _format_market_combo_eod(kind, limit=limit, now=now)
+    return "Format: MARKET COMBO [1|2] [LIVE|EOD] [1-10]"
