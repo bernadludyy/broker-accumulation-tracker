@@ -306,20 +306,35 @@ def analyze_market_combo_eod(kind: int, rows: list[dict]) -> dict:
     }
 
 
-def _compact(value: float, unit: str = "") -> str:
+def _id_number(value: float, digits: int = 2) -> str:
+    """Format a number with Indonesian decimal and thousands separators."""
+    text = f"{float(value):,.{digits}f}"
+    return text.translate(str.maketrans({",": ".", ".": ","}))
+
+
+def _compact(value: float, unit: str = "", *, currency: bool = False) -> str:
     amount = abs(float(value))
     sign = "-" if value < 0 else ""
     for threshold, suffix in (
-        (1e12, "T"), (1e9, "M"), (1e6, "Jt"), (1e3, "Rb")
+        (1e12, "triliun"),
+        (1e9, "miliar"),
+        (1e6, "juta"),
+        (1e3, "ribu"),
     ):
         if amount >= threshold:
-            return f"{sign}{amount / threshold:,.2f} {suffix}{unit}"
-    return f"{sign}{amount:,.0f}{unit}"
+            prefix = "Rp" if currency else ""
+            return f"{prefix}{sign}{_id_number(amount / threshold)} {suffix}{unit}"
+    prefix = "Rp" if currency else ""
+    return f"{prefix}{sign}{_id_number(amount, 0)}{unit}"
+
+
+def _whole(value: float) -> str:
+    return _id_number(value, 0)
 
 
 def _ratio_text(value: float | None, ask_lots: float | None) -> str:
     if value is not None:
-        return f"{value:.2f}x"
+        return f"{_id_number(value)}x"
     if ask_lots == 0:
         return "offer top-5 kosong"
     return "N/A"
@@ -357,50 +372,62 @@ def _format_market_combo_live(
         return f"⏳ MARKET COMBO {kind} — DATA BELUM VALID\n{detail}"
 
     title = (
-        "⚡ MARKET COMBO 2 — VOLUME + FREQUENCY + BID"
+        "⚡ MARKET COMBO 2 LIVE — VOLUME + TRANSAKSI + BID"
         if kind == 2
-        else "📈 MARKET COMBO 1 — HIGH ATS + BID"
+        else "📈 MARKET COMBO 1 LIVE — RATA-RATA TRANSAKSI BESAR + BID"
     )
     lines = [
         title,
-        f"Stock-summary: {day} | {source}",
-        f"Orderbook diperiksa: {report['checked_count']} kandidat "
-        f"| valid {report['valid_books']}",
-        f"Bid minimum: {BID_MIN_PCT:.0f}%",
+        f"Data pasar: {day} | {source}",
+        f"Orderbook diperiksa: {report['checked_count']} saham "
+        f"| terbaca {report['valid_books']}",
+        f"Syarat bid minimum: {_id_number(BID_MIN_PCT, 0)}%",
     ]
     if kind == 2:
-        lines.append(f"Prefilter: Top {TOP_RANK} Volume ∩ Top {TOP_RANK} Frequency")
+        lines.append(
+            f"Filter awal: {TOP_RANK} volume terbesar + "
+            f"{TOP_RANK} transaksi terbanyak"
+        )
     else:
         lines.append(
-            f"Prefilter: ATS nilai/trx ≥ {_compact(report['ats_threshold'])} "
-            f"(P{COMBO1_ATS_PERCENTILE * 100:.0f})"
+            "Filter awal: rata-rata nilai per transaksi minimal "
+            f"{_compact(report['ats_threshold'], currency=True)} "
+            f"({(1 - COMBO1_ATS_PERCENTILE) * 100:.0f}% tertinggi)"
         )
-        lines.append("Market cap: tidak difilter")
+        lines.append("Ukuran perusahaan: tidak dibatasi")
 
     selected = report["rows"][:limit]
     lines.append("")
     if not selected:
-        lines.append("Belum ada kandidat yang lolos bid dominance live.")
+        lines.append("Belum ada saham yang memenuhi syarat bid live.")
     for index, row in enumerate(selected, 1):
         ratio = _ratio_text(row.get("bid_offer_ratio"), row.get("top5_ask_lots"))
         spread = (
-            f"{row['spread_pct']:.2f}%"
+            f"{_id_number(row['spread_pct'])}%"
             if row.get("spread_pct") is not None else "N/A"
         )
         lines.append(
-            f"{index}. {row['ticker']} | Bid {row['bid_percent']:.1f}% "
-            f"| B/O {ratio} | Spread {spread}"
+            f"{index}. {row['ticker']} | Bid {_id_number(row['bid_percent'], 1)}% "
+            f"| Rasio Bid/Offer {ratio} | Spread {spread}"
         )
         if kind == 2:
             lines.append(
-                f"   Volume #{row['volume_rank']} ({_compact(row['volume'], ' saham')}) "
-                f"| Freq #{row['frequency_rank']} ({row['frequency']:,})"
+                f"   Volume #{row['volume_rank']}: "
+                f"{_compact(row['volume'], ' lembar')}"
+            )
+            lines.append(
+                f"   Transaksi #{row['frequency_rank']}: "
+                f"{_whole(row['frequency'])} kali"
             )
         else:
             lines.append(
-                f"   ATS {_compact(row['ats_value'])}/trx "
-                f"| ≈{row['ats_lots']:,.1f} lot/trx "
-                f"| Freq {row['frequency']:,}"
+                "   Rata-rata nilai/transaksi: "
+                f"{_compact(row['ats_value'], currency=True)}"
+            )
+            lines.append(
+                "   Rata-rata volume/transaksi: "
+                f"≈{_id_number(row['ats_lots'], 1)} lot "
+                f"| Total {_whole(row['frequency'])} transaksi"
             )
     lines += [
         "",
@@ -412,7 +439,7 @@ def _format_market_combo_live(
             "Orderbook gagal/tidak lengkap: " + ", ".join(report["errors"][:10])
         )
     lines += [
-        "⚠️ WATCH ONLY — tembok bid dapat dibatalkan/spoofing.",
+        "⚠️ WATCH ONLY — antrean bid dapat berubah atau dibatalkan.",
         "Bukan sinyal entry; konfirmasi momentum dan buyer flow melalui Bot 4.",
     ]
     return "\n".join(lines)
@@ -436,23 +463,28 @@ def _format_market_combo_eod(
         return f"⏳ MARKET COMBO {kind} EOD — DATA BELUM VALID\n{detail}"
 
     title = (
-        "🌙 MARKET COMBO 2 EOD — VOLUME + FREQUENCY"
+        "🌙 MARKET COMBO 2 EOD — VOLUME + JUMLAH TRANSAKSI"
         if kind == 2
-        else "🌙 MARKET COMBO 1 EOD — HIGH ATS"
+        else "🌙 MARKET COMBO 1 EOD — RATA-RATA TRANSAKSI BESAR"
     )
     lines = [
         title,
-        f"Snapshot: {day} | {source}",
-        f"Universe valid: {report['market_count']} | kandidat: {report['eligible_count']}",
+        f"Data penutupan: {day} | {source}",
+        f"Saham dengan data lengkap: {report['market_count']}",
+        f"Lolos filter awal: {report['eligible_count']} saham",
     ]
     if kind == 2:
-        lines.append(f"Prefilter: Top {TOP_RANK} Volume ∩ Top {TOP_RANK} Frequency")
+        lines.append(
+            f"Filter awal: {TOP_RANK} volume terbesar + "
+            f"{TOP_RANK} transaksi terbanyak"
+        )
     else:
         lines.append(
-            f"Prefilter: ATS nilai/trx ≥ {_compact(report['ats_threshold'])} "
-            f"(P{COMBO1_ATS_PERCENTILE * 100:.0f})"
+            "Filter awal: rata-rata nilai per transaksi minimal "
+            f"{_compact(report['ats_threshold'], currency=True)} "
+            f"({(1 - COMBO1_ATS_PERCENTILE) * 100:.0f}% tertinggi)"
         )
-        lines.append("Market cap: tidak difilter")
+        lines.append("Ukuran perusahaan: tidak dibatasi")
 
     expected = _expected_eod_date(now)
     if day < expected:
@@ -466,21 +498,31 @@ def _format_market_combo_eod(
         lines.append("Belum ada kandidat yang lolos prefilter EOD.")
     for index, row in enumerate(selected, 1):
         if kind == 2:
+            lines.append(f"{index}. {row['ticker']}")
             lines.append(
-                f"{index}. {row['ticker']} | Volume #{row['volume_rank']} "
-                f"({_compact(row['volume'], ' saham')})"
+                f"   Volume: peringkat #{row['volume_rank']} | "
+                f"{_compact(row['volume'], ' lembar')}"
             )
             lines.append(
-                f"   Frequency #{row['frequency_rank']} ({row['frequency']:,}) "
-                f"| Value {_compact(row['value'])}"
+                f"   Transaksi: peringkat #{row['frequency_rank']} | "
+                f"{_whole(row['frequency'])} kali"
+            )
+            lines.append(
+                f"   Nilai transaksi: {_compact(row['value'], currency=True)}"
             )
         else:
+            lines.append(f"{index}. {row['ticker']}")
             lines.append(
-                f"{index}. {row['ticker']} | ATS {_compact(row['ats_value'])}/trx "
-                f"| ≈{row['ats_lots']:,.1f} lot/trx"
+                "   Rata-rata nilai/transaksi: "
+                f"{_compact(row['ats_value'], currency=True)}"
             )
             lines.append(
-                f"   Frequency {row['frequency']:,} | Value {_compact(row['value'])}"
+                "   Rata-rata volume/transaksi: "
+                f"≈{_id_number(row['ats_lots'], 1)} lot"
+            )
+            lines.append(
+                f"   Total: {_whole(row['frequency'])} transaksi | "
+                f"{_compact(row['value'], currency=True)}"
             )
 
     lines += [
