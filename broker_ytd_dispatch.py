@@ -9,6 +9,7 @@ import telegram_query_bot as legacy
 from broker_ytd_matrix import format_broker_top, format_ticker_top
 from broker_persistence import format_persistence
 from broker_stalker import ALLOWED_LOOKBACKS, format_broker_stalker
+from market_combos import format_market_combo
 
 
 _HELP = """
@@ -16,6 +17,11 @@ _HELP = """
 BROKER STALKER
 BROKER STALKER 10D 6
 → Saham yang net buy oleh banyak broker; default 5 sesi, maksimal 10 hasil.
+MARKET COMBO 2
+→ Top Volume ∩ Top Frequency, lalu konfirmasi bid/offer live (prioritas pertama).
+MARKET COMBO 1
+→ High ATS satu hari + bid/offer live; market cap tidak difilter.
+→ Opsional limit: MARKET COMBO 2 5 atau MARKET COMBO 1 5.
 BROKER PERSIST BBRI
 → Persistensi broker 5/10/20 sesi cache, net buy terkini vs YTD, intensitas.
 BROKER TOP BBRI YTD
@@ -40,6 +46,16 @@ def command_result(text: str, chat_id: str) -> str:
         return _original_command_result(text, chat_id)
 
     first = parts[0].split("@")[0].lower()
+    if first == "market" and len(parts) >= 2 and parts[1].upper() == "COMBO":
+        if len(parts) not in {3, 4} or parts[2] not in {"1", "2"}:
+            return "Format: MARKET COMBO [1|2] [1-10]"
+        limit = 5
+        if len(parts) == 4:
+            if not parts[3].isdigit() or not 1 <= int(parts[3]) <= 10:
+                return "Format: MARKET COMBO [1|2] [1-10]"
+            limit = int(parts[3])
+        return format_market_combo(int(parts[2]), limit=limit)
+
     is_stalker = (
         (first == "broker" and len(parts) >= 2 and parts[1].upper() == "STALKER")
         or first in {"stalker", "/stalker"}

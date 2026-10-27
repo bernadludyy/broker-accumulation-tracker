@@ -594,6 +594,11 @@ def fetch_multi_quote(tickers: Iterable[str]) -> dict:
     return _get("summary", {"codes": codes})
 
 
+def fetch_orderbook(ticker: str) -> dict:
+    """Fetch one live orderbook; live market policy deliberately disables cache."""
+    return _get("orderbook", {"code": ticker.upper().strip()})
+
+
 def _parse_number(x) -> Optional[float]:
     if x is None:
         return None
