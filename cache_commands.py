@@ -99,11 +99,20 @@ def _market_in_progress(now: datetime) -> bool:
     return 9 * 60 <= minutes <= 15 * 60 + 50
 
 
-def load_cached_market(*, now: datetime | None = None) -> tuple[list[dict], str, str]:
-    """Cache-only market snapshot. Never invokes a ZAPI fetch."""
+def load_cached_market(
+    *,
+    now: datetime | None = None,
+    completed_only: bool = False,
+) -> tuple[list[dict], str, str]:
+    """Cache-only market snapshot. Never invokes a ZAPI fetch.
+
+    ``completed_only`` excludes the active trading session and only returns a
+    snapshot on or before the latest completed EOD target.  This is useful for
+    commands that must remain reproducible while the market is open.
+    """
     now = (now or datetime.now(WIB)).astimezone(WIB)
 
-    if _market_in_progress(now):
+    if _market_in_progress(now) and not completed_only:
         shared = tracker.peek_shared_stock_summary()
         rows = _market_rows_from_payload(shared)
         shared_day = _row_date(rows)
@@ -136,6 +145,10 @@ def load_cached_market(*, now: datetime | None = None) -> tuple[list[dict], str,
             candidates.append(
                 (shared_day, 1, shared_rows, "PROJECT FABRIC SHARED CACHE")
             )
+
+    if completed_only:
+        target = _expected_eod_date(now)
+        candidates = [item for item in candidates if item[0] <= target]
 
     if candidates:
         day, _priority, rows, source = max(
