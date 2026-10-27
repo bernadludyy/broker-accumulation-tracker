@@ -37,22 +37,24 @@ def book(bid_pct):
 class MarketComboTests(unittest.TestCase):
     market_time = datetime(2026, 10, 27, 10, 0, tzinfo=ZoneInfo("Asia/Jakarta"))
 
-    def test_combo2_prefilters_volume_frequency_then_live_bid(self):
+    def test_combo2_prefilters_value_frequency_then_live_bid(self):
         rows = [
-            market_row("AAAA", 1_000_000, 5_000_000_000, 10_000),
-            market_row("BBBB", 900_000, 4_000_000_000, 9_000),
-            market_row("CCCC", 800_000, 3_000_000_000, 8_000),
+            market_row("CHEAP", 1_000_000_000, 1_000_000_000, 3_000),
+            market_row("MONEY", 1_000_000, 100_000_000_000, 2_000),
+            market_row("ACTIVE", 2_000_000, 50_000_000_000, 1_000),
         ]
         calls = []
 
         def fetcher(code):
             calls.append(code)
-            return book({"AAAA": 70, "BBBB": 59, "CCCC": 65}[code])
+            return book(70)
 
-        report = combos.analyze_market_combo(2, rows, fetcher=fetcher)
-        self.assertEqual([r["ticker"] for r in report["rows"]], ["AAAA", "CCCC"])
-        self.assertEqual(set(calls), {"AAAA", "BBBB", "CCCC"})
-        self.assertEqual(report["checked_count"], 3)
+        with patch.object(combos, "TOP_RANK", 2):
+            report = combos.analyze_market_combo(2, rows, fetcher=fetcher)
+
+        self.assertEqual([r["ticker"] for r in report["rows"]], ["MONEY"])
+        self.assertEqual(calls, ["MONEY"])
+        self.assertEqual(report["checked_count"], 1)
 
     def test_combo2_never_fetches_more_than_bounded_shortlist(self):
         rows = [
@@ -176,6 +178,9 @@ class MarketComboTests(unittest.TestCase):
         self.assertIn("2,88 miliar lembar", text)
         self.assertIn("43.317 kali", text)
         self.assertIn("Rp381,44 miliar", text)
+        self.assertIn("Harga penutupan: Rp100", text)
+        self.assertIn("Rata-rata harga: Rp132,44", text)
+        self.assertIn("bukan harga dominan beli", text)
         self.assertNotIn("2.88 M saham", text)
 
     def test_command_routes_combo2_and_combo1(self):

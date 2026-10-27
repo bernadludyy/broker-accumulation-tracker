@@ -145,6 +145,7 @@ def _normalize_market(rows: list[dict]) -> list[dict]:
                 "frequency": int(frequency),
                 "close": close,
                 "market_cap": _num(raw, "MarketCap", "marketCap", "market_cap"),
+                "avg_trade_price": value / volume,
                 "ats_value": value / frequency,
                 "ats_lots": volume / frequency / 100.0,
             }
@@ -153,6 +154,10 @@ def _normalize_market(rows: list[dict]) -> list[dict]:
         sorted(result, key=lambda x: (-x["volume"], x["ticker"])), 1
     ):
         row["volume_rank"] = rank
+    for rank, row in enumerate(
+        sorted(result, key=lambda x: (-x["value"], x["ticker"])), 1
+    ):
+        row["value_rank"] = rank
     for rank, row in enumerate(
         sorted(result, key=lambda x: (-x["frequency"], x["ticker"])), 1
     ):
@@ -216,13 +221,13 @@ def _prefilter_market(kind: int, rows: list[dict]) -> dict:
     if kind == 2:
         eligible = [
             row for row in market
-            if row["volume_rank"] <= TOP_RANK
+            if row["value_rank"] <= TOP_RANK
             and row["frequency_rank"] <= TOP_RANK
         ]
         eligible.sort(
             key=lambda x: (
-                x["volume_rank"] + x["frequency_rank"],
-                x["volume_rank"],
+                x["value_rank"] + x["frequency_rank"],
+                x["value_rank"],
                 x["ticker"],
             )
         )
@@ -274,7 +279,7 @@ def analyze_market_combo(
         selected.sort(
             key=lambda x: (
                 -x["bid_percent"],
-                x["volume_rank"] + x["frequency_rank"],
+                x["value_rank"] + x["frequency_rank"],
                 x["ticker"],
             )
         )
@@ -332,6 +337,14 @@ def _whole(value: float) -> str:
     return _id_number(value, 0)
 
 
+def _price(value: float | None) -> str:
+    if value is None or not math.isfinite(float(value)) or float(value) <= 0:
+        return "N/A"
+    number = float(value)
+    digits = 0 if number.is_integer() else 2
+    return f"Rp{_id_number(number, digits)}"
+
+
 def _ratio_text(value: float | None, ask_lots: float | None) -> str:
     if value is not None:
         return f"{_id_number(value)}x"
@@ -372,7 +385,7 @@ def _format_market_combo_live(
         return f"⏳ MARKET COMBO {kind} — DATA BELUM VALID\n{detail}"
 
     title = (
-        "⚡ MARKET COMBO 2 LIVE — VOLUME + TRANSAKSI + BID"
+        "⚡ MARKET COMBO 2 LIVE — NILAI + TRANSAKSI + BID"
         if kind == 2
         else "📈 MARKET COMBO 1 LIVE — RATA-RATA TRANSAKSI BESAR + BID"
     )
@@ -385,7 +398,7 @@ def _format_market_combo_live(
     ]
     if kind == 2:
         lines.append(
-            f"Filter awal: {TOP_RANK} volume terbesar + "
+            f"Filter awal: {TOP_RANK} nilai transaksi terbesar + "
             f"{TOP_RANK} transaksi terbanyak"
         )
     else:
@@ -412,12 +425,19 @@ def _format_market_combo_live(
         )
         if kind == 2:
             lines.append(
-                f"   Volume #{row['volume_rank']}: "
-                f"{_compact(row['volume'], ' lembar')}"
+                f"   Nilai #{row['value_rank']}: "
+                f"{_compact(row['value'], currency=True)}"
             )
             lines.append(
                 f"   Transaksi #{row['frequency_rank']}: "
                 f"{_whole(row['frequency'])} kali"
+            )
+            lines.append(
+                f"   Harga terakhir: {_price(row.get('close'))} | "
+                f"Rata-rata harga: {_price(row.get('avg_trade_price'))}"
+            )
+            lines.append(
+                f"   Volume pendukung: {_compact(row['volume'], ' lembar')}"
             )
         else:
             lines.append(
@@ -442,6 +462,10 @@ def _format_market_combo_live(
         "⚠️ WATCH ONLY — antrean bid dapat berubah atau dibatalkan.",
         "Bukan sinyal entry; konfirmasi momentum dan buyer flow melalui Bot 4.",
     ]
+    if kind == 2:
+        lines.append(
+            "Harga rata-rata = nilai transaksi ÷ volume; bukan harga dominan beli."
+        )
     return "\n".join(lines)
 
 
@@ -463,7 +487,7 @@ def _format_market_combo_eod(
         return f"⏳ MARKET COMBO {kind} EOD — DATA BELUM VALID\n{detail}"
 
     title = (
-        "🌙 MARKET COMBO 2 EOD — VOLUME + JUMLAH TRANSAKSI"
+        "🌙 MARKET COMBO 2 EOD — NILAI + JUMLAH TRANSAKSI"
         if kind == 2
         else "🌙 MARKET COMBO 1 EOD — RATA-RATA TRANSAKSI BESAR"
     )
@@ -475,7 +499,7 @@ def _format_market_combo_eod(
     ]
     if kind == 2:
         lines.append(
-            f"Filter awal: {TOP_RANK} volume terbesar + "
+            f"Filter awal: {TOP_RANK} nilai transaksi terbesar + "
             f"{TOP_RANK} transaksi terbanyak"
         )
     else:
@@ -500,15 +524,19 @@ def _format_market_combo_eod(
         if kind == 2:
             lines.append(f"{index}. {row['ticker']}")
             lines.append(
-                f"   Volume: peringkat #{row['volume_rank']} | "
-                f"{_compact(row['volume'], ' lembar')}"
+                f"   Nilai: peringkat #{row['value_rank']} | "
+                f"{_compact(row['value'], currency=True)}"
             )
             lines.append(
                 f"   Transaksi: peringkat #{row['frequency_rank']} | "
                 f"{_whole(row['frequency'])} kali"
             )
             lines.append(
-                f"   Nilai transaksi: {_compact(row['value'], currency=True)}"
+                f"   Harga penutupan: {_price(row.get('close'))} | "
+                f"Rata-rata harga: {_price(row.get('avg_trade_price'))}"
+            )
+            lines.append(
+                f"   Volume pendukung: {_compact(row['volume'], ' lembar')}"
             )
         else:
             lines.append(f"{index}. {row['ticker']}")
@@ -532,6 +560,10 @@ def _format_market_combo_eod(
         f"Saat bursa buka, konfirmasi dengan MARKET COMBO {kind} LIVE.",
         "Konfirmasi momentum dan buyer flow melalui Bot 4.",
     ]
+    if kind == 2:
+        lines.append(
+            "Harga rata-rata = nilai transaksi ÷ volume; bukan harga dominan beli."
+        )
     return "\n".join(lines)
 
 
