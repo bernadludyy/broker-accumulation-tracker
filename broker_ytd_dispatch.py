@@ -8,10 +8,14 @@ from __future__ import annotations
 import telegram_query_bot as legacy
 from broker_ytd_matrix import format_broker_top, format_ticker_top
 from broker_persistence import format_persistence
+from broker_stalker import ALLOWED_LOOKBACKS, format_broker_stalker
 
 
 _HELP = """
 🏆 BROKER YTD MATRIX (hanya cache SQLite, 0 extra ZAPI)
+BROKER STALKER
+BROKER STALKER 10D 6
+→ Saham yang net buy oleh banyak broker; default 5 sesi, maksimal 10 hasil.
 BROKER PERSIST BBRI
 → Persistensi broker 5/10/20 sesi cache, net buy terkini vs YTD, intensitas.
 BROKER TOP BBRI YTD
@@ -36,6 +40,39 @@ def command_result(text: str, chat_id: str) -> str:
         return _original_command_result(text, chat_id)
 
     first = parts[0].split("@")[0].lower()
+    is_stalker = (
+        (first == "broker" and len(parts) >= 2 and parts[1].upper() == "STALKER")
+        or first in {"stalker", "/stalker"}
+    )
+    if is_stalker:
+        options = parts[2:] if first == "broker" else parts[1:]
+        lookback = 5
+        limit = 6
+        seen_period = False
+        seen_limit = False
+        for option in options:
+            upper = option.upper()
+            if upper.endswith("D") and upper[:-1].isdigit():
+                value = int(upper[:-1])
+                if seen_period or value not in ALLOWED_LOOKBACKS:
+                    return "Format: BROKER STALKER [5D|10D|20D] [1-10]"
+                lookback = value
+                seen_period = True
+            elif option.isdigit():
+                value = int(option)
+                if seen_limit or not 1 <= value <= 10:
+                    return "Format: BROKER STALKER [5D|10D|20D] [1-10]"
+                limit = value
+                seen_limit = True
+            else:
+                return "Format: BROKER STALKER [5D|10D|20D] [1-10]"
+        return format_broker_stalker(
+            str(legacy.DB_PATH),
+            legacy.safe_end_date(),
+            lookback=lookback,
+            limit=limit,
+        )
+
     if first == "broker" and len(parts) >= 2 and parts[1].upper() == "PERSIST":
         if len(parts) != 3:
             return "Format: BROKER PERSIST BBRI"
