@@ -18,9 +18,9 @@ BROKER STALKER
 BROKER STALKER 10D 6
 → Saham yang net buy oleh banyak broker; default 5 sesi, maksimal 10 hasil.
 MARKET COMBO 2 LIVE
-→ Top Volume ∩ Top Frequency, lalu konfirmasi bid/offer saat bursa berjalan.
+→ Top Value ∩ Top Frequency, lalu konfirmasi bid/offer saat bursa berjalan.
 MARKET COMBO 2 EOD
-→ Watchlist Volume + Frequency dari cache EOD; 0 ZAPI/orderbook.
+→ Watchlist Value + Frequency dari cache EOD; tampilkan penutupan dan harga rata-rata.
 MARKET COMBO 1 LIVE
 → High ATS satu hari + bid/offer live; market cap tidak difilter.
 MARKET COMBO 1 EOD
