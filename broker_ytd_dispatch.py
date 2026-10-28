@@ -10,6 +10,7 @@ from broker_ytd_matrix import format_broker_top, format_ticker_top
 from broker_persistence import format_persistence
 from broker_stalker import ALLOWED_LOOKBACKS, format_broker_stalker
 from bandar_momentum import format_bandar_momentum
+from bull_divergence import format_bull_divergence
 from market_combos import format_market_combo
 
 
@@ -24,6 +25,11 @@ BANDAR MOMENTUM EOD 10
 BANDAR MOMENTUM LIVE 10
 → Harga/value sesi berjalan (1 snapshot ZAPI); broker tetap dari cache selesai.
 → /bandar_momentum adalah alias. Limit opsional 1–15.
+BULL DIV
+BULL DIV 10
+BULL DIV BBRI
+→ Regular bullish divergence: harga lower low + RSI14 higher low dari pivot EOD Neon.
+→ /bulldiv adalah alias; screener cache-only, 0 ZAPI.
 MARKET COMBO 2 LIVE
 → Top Value ∩ Top Frequency, lalu konfirmasi bid/offer saat bursa berjalan.
 MARKET COMBO 2 EOD
@@ -88,6 +94,23 @@ def command_result(text: str, chat_id: str) -> str:
             mode=mode,
             limit=limit,
         )
+
+    is_bull_div = (
+        (first == "bull" and len(parts) >= 2 and parts[1].upper() in {"DIV", "DIVERGENCE"})
+        or first in {"/bulldiv", "bulldiv", "/bull_div", "bull_div"}
+    )
+    if is_bull_div:
+        options = parts[2:] if first == "bull" else parts[1:]
+        if len(options) > 1:
+            return "Format: BULL DIV [1-15|TICKER]"
+        if not options:
+            return format_bull_divergence(limit=10)
+        option = options[0].strip().upper()
+        if option.isdigit() and 1 <= int(option) <= 15:
+            return format_bull_divergence(limit=int(option))
+        if legacy.TICKER_RE.fullmatch(option):
+            return format_bull_divergence(ticker=option, limit=1)
+        return "Format: BULL DIV [1-15|TICKER]"
 
     if first == "market" and len(parts) >= 2 and parts[1].upper() == "COMBO":
         format_hint = "Format: MARKET COMBO [1|2] [LIVE|EOD] [1-10]"
