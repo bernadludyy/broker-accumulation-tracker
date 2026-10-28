@@ -9,6 +9,7 @@ import telegram_query_bot as legacy
 from broker_ytd_matrix import format_broker_top, format_ticker_top
 from broker_persistence import format_persistence
 from broker_stalker import ALLOWED_LOOKBACKS, format_broker_stalker
+from bandar_momentum import format_bandar_momentum
 from market_combos import format_market_combo
 
 
@@ -17,6 +18,12 @@ _HELP = """
 BROKER STALKER
 BROKER STALKER 10D 6
 → Saham yang net buy oleh banyak broker; default 5 sesi, maksimal 10 hasil.
+BANDAR MOMENTUM
+BANDAR MOMENTUM EOD 10
+→ Screener broker + Value + EMA20 + RS + RSI + return; default EOD dan 0 ZAPI.
+BANDAR MOMENTUM LIVE 10
+→ Harga/value sesi berjalan (1 snapshot ZAPI); broker tetap dari cache selesai.
+→ /bandar_momentum adalah alias. Limit opsional 1–15.
 MARKET COMBO 2 LIVE
 → Top Value ∩ Top Frequency, lalu konfirmasi bid/offer saat bursa berjalan.
 MARKET COMBO 2 EOD
@@ -50,6 +57,38 @@ def command_result(text: str, chat_id: str) -> str:
         return _original_command_result(text, chat_id)
 
     first = parts[0].split("@")[0].lower()
+    is_bandar_momentum = (
+        (first == "bandar" and len(parts) >= 2 and parts[1].upper() == "MOMENTUM")
+        or first in {"/bandar_momentum", "bandar_momentum"}
+    )
+    if is_bandar_momentum:
+        options = parts[2:] if first == "bandar" else parts[1:]
+        format_hint = "Format: BANDAR MOMENTUM [EOD|LIVE] [1-15]"
+        mode = "EOD"
+        limit = 10
+        mode_seen = False
+        limit_seen = False
+        for option in options:
+            upper = option.upper()
+            if upper in {"LIVE", "EOD"}:
+                if mode_seen:
+                    return format_hint
+                mode = upper
+                mode_seen = True
+            elif option.isdigit() and 1 <= int(option) <= 15:
+                if limit_seen:
+                    return format_hint
+                limit = int(option)
+                limit_seen = True
+            else:
+                return format_hint
+        return format_bandar_momentum(
+            str(legacy.DB_PATH),
+            legacy.safe_end_date(),
+            mode=mode,
+            limit=limit,
+        )
+
     if first == "market" and len(parts) >= 2 and parts[1].upper() == "COMBO":
         format_hint = "Format: MARKET COMBO [1|2] [LIVE|EOD] [1-10]"
         if len(parts) not in {3, 4, 5} or parts[2] not in {"1", "2"}:
