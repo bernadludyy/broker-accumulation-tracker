@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 
 import tracker
 from bot2_entry import format_bot2_entry, format_bot2_market_command
+from market_regime import detect_regime, format_regime
 from cache_commands import (
     format_cache_status,
     format_top_value,
@@ -4346,6 +4347,11 @@ def format_bot1_full(ticker: str) -> str:
 
 HELP_TEXT = """🤖 BROKER QUERY BOT — COMMAND LIST
 
+🛡 MARKET REGIME GATE
+MARKET REGIME
+/marketregime
+→ Regime dari breadth, foreign flow, dan open→close shared snapshot.
+
 📊 FUNDAMENTAL SEKTOR (Neon, 0 extra ZAPI)
 /fund ADRO
 ADRO FUND
@@ -4806,6 +4812,18 @@ def command_result(text: str, chat_id: str) -> str:
 
     if first_lower in {"/start", "/help", "help"}:
         return HELP_TEXT
+
+    if first_lower in {"/marketregime", "marketregime"} or (
+        first_lower == "market" and len(parts) >= 2 and parts[1].upper() == "REGIME"
+    ):
+        try:
+            from bot2_entry import load_shared_live_market
+            rows, day, source = load_shared_live_market(with_source=True)
+            return format_regime(detect_regime(rows, f"{source} ({day})"))
+        except Exception as exc:
+            return ("🛡 MARKET REGIME GATE\n\nREGIME: UNKNOWN\nMODE: CASH / NO TRADE\n"
+                    f"Data error: {type(exc).__name__}: {str(exc)[:160]}\n"
+                    "Action: refresh market snapshot lalu ulangi command.")
 
     if first_lower in {"/intel", "intel", "universe"}:
         if len(parts) < 2:
