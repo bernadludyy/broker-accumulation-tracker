@@ -10,7 +10,7 @@ from ai_decision_engine.__main__ import DataNotReady, completed_day, ticker_code
 def sample(bull=True, broker=True):
     day=date(2026,10,28)
     history=[{"trade_date":(day-timedelta(days=40-i)).isoformat(),
-              "close_price":100+i,"volume_shares":1000} for i in range(40)]
+              "close_price":100+i+(4 if i%2==0 else -4),"volume_shares":1000} for i in range(40)]
     summary={"trade_date":day,"open_price":138,"close_price":141,"volume_shares":1600}
     universe=[{"OpenPrice":100,"Close":102 if bull else 98,
                "foreignBuyValue":200 if bull else 100,
