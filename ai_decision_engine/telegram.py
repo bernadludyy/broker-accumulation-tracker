@@ -8,13 +8,19 @@ from __future__ import annotations
 import os
 from typing import NamedTuple
 
-from .__main__ import DataNotReady, decide, load_snapshot, ticker_code
+from .__main__ import (
+    DataNotReady,
+    decide,
+    is_repairable_history_error,
+    load_snapshot,
+    ticker_code,
+)
 
 
 USAGE = (
     "🧠 BOT 1 — AI DECISION\n"
     "AI STATUS — status integrasi dan biaya\n"
-    "AI CHECK BBRI — validasi EOD/cache, 0 AI dan 0 ZAPI\n"
+    "AI CHECK BBRI — validasi EOD/cache, 0 AI; repair histori maks 1 ZAPI\n"
     "AI RUN BBRI — Bull/Bear/Risk, maks 3 request AI (berbayar, jika diaktifkan)\n"
     "Alias: /ai BBRI, /ai_run BBRI, BOT1 AI CHECK BBRI"
 )
@@ -65,6 +71,22 @@ def _broker_value(value: float | None) -> str:
     return f"Rp {value / 1_000_000_000:+,.2f} M"
 
 
+def _repair_history_and_reload(code: str, broker_db: str) -> tuple[dict, int]:
+    """Repair one ticker through the shared cache, then re-read the strict snapshot.
+
+    ``tracker.fetch_stock_history`` checks the six-hour Project Fabric cache first,
+    archives completed sessions in Neon, and makes at most one logical upstream
+    request when no fresh cache exists.  The second load still applies every
+    point-in-time and continuity guard from ``load_snapshot``.
+    """
+    import tracker
+
+    before = int(tracker._GATEWAY.usage()["totals"]["upstream_attempts"])
+    tracker.fetch_stock_history(code, length=tracker.CANONICAL_STOCK_HISTORY_LENGTH)
+    after = int(tracker._GATEWAY.usage()["totals"]["upstream_attempts"])
+    return load_snapshot(code, broker_db=broker_db), max(0, after - before)
+
+
 def format_ai_command(request: AIRequest, *, broker_db: str = "broker_tracker.db") -> str:
     if request.mode == "HELP":
         return USAGE
@@ -94,11 +116,20 @@ def format_ai_command(request: AIRequest, *, broker_db: str = "broker_tracker.db
         )
     if remote and not os.getenv("OPENAI_API_KEY"):
         return "🔒 OPENAI_API_KEY belum dikonfigurasi. AI CHECK " + code + " tetap tersedia."
+    history_repaired = False
+    zapi_requests = 0
     try:
-        snapshot = load_snapshot(code, broker_db=broker_db)
+        try:
+            snapshot = load_snapshot(code, broker_db=broker_db)
+        except DataNotReady as exc:
+            if not is_repairable_history_error(exc):
+                raise
+            history_repaired = True
+            snapshot, zapi_requests = _repair_history_and_reload(code, broker_db)
         result = decide(snapshot, remote=remote)
     except (DataNotReady, ValueError) as exc:
-        return f"⚠️ BOT1 AI {code}: WAIT / DATA NOT READY\n{str(exc)[:180]}\nAPI AI: 0 | ZAPI: 0"
+        return (f"⚠️ BOT1 AI {code}: WAIT / DATA NOT READY\n{str(exc)[:180]}\n"
+                f"API AI: 0 | ZAPI: {zapi_requests}")
     except Exception as exc:
         # Never leak connection strings, credentials, or provider errors.
         return (f"⚠️ BOT1 AI {code}: WAIT / ERROR\n"
@@ -114,6 +145,9 @@ def format_ai_command(request: AIRequest, *, broker_db: str = "broker_tracker.db
         f"({snapshot['broker']['coverage']}; {snapshot['broker']['sessions']} sesi)",
         f"Hard gate: {result['gate']}",
     ]
+    if history_repaired:
+        source = "cache bersama" if zapi_requests == 0 else f"{zapi_requests} request ZAPI"
+        lines.append(f"History repair: BERHASIL ({source})")
     if result["gate_reasons"]:
         lines.append("Alasan gate: " + "; ".join(result["gate_reasons"][:5]))
     if remote:
@@ -126,7 +160,7 @@ def format_ai_command(request: AIRequest, *, broker_db: str = "broker_tracker.db
     else:
         lines.append("AI action: NOT RUN (CHECK hanya validasi data & gate)")
     lines.extend([
-        f"AI requests: {result['ai_calls']} | ZAPI requests: 0",
+        f"AI requests: {result['ai_calls']} | ZAPI requests: {zapi_requests}",
         "Catatan: broker net value adalah aktivitas transaksi, bukan kepemilikan.",
         "Tidak ada eksekusi order; bukan jaminan profit.",
     ])
