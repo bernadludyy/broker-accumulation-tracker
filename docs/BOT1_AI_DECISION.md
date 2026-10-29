@@ -6,7 +6,7 @@ This module is an isolated, OFF-BY-DEFAULT research layer. No Telegram integrati
 
 The original TradingAgentsGraph for stocks reads from external Yahoo/SEC sources. That would violate the requested cache-only IDX setup. Instead this pilot imports the OFFICIAL TradingAgents v0.7.1 LLM client factory and creates three narrowly scoped analyst prompts: Bull Researcher, Bear Researcher, Risk Manager. It is not the full upstream graph or its backtest.
 
-Neon sources: project_fabric.stock_summary_daily and project_fabric.stock_history_daily. Their verified completed EOD bars are merged by date (daily summary overrides duplicate older history), closing recent historical-archive gaps without ZAPI calls. Any internal gap over 7 calendar days is rejected. A single REPEATABLE READ READ ONLY transaction limits data to a completed EOD day. SQLite broker_daily is also read-only. The source is historical ZAPI-derived cache, but ZAPI requests = 0.
+Neon sources: project_fabric.stock_summary_daily and project_fabric.stock_history_daily. Their verified completed EOD bars are merged by date (daily summary overrides duplicate older history). Any internal gap over 7 calendar days is rejected. On that specific continuity failure, the Telegram adapter performs one bounded ticker-history repair: it checks the six-hour shared Project Fabric cache first and makes at most one logical ZAPI fetch when the cache is absent, archives completed sessions, then reruns every strict validation. Summary staleness, invalid EOD, and other failures never trigger repair. A single REPEATABLE READ READ ONLY transaction limits each validation read to a completed EOD day. SQLite broker_daily is also read-only.
 
 Point-in-time guards require at least 30 price sessions, matching completed summary, a recent broker snapshot with >=3 sessions, positive indicative broker net activity, bullish market regime, price above MA20, valid volume, and RSI less than 80. Missing data causes WAIT, not invented values. Broker net buy is transaction activity, NOT holdings. Financial statements are omitted pending publication-time verification.
 
@@ -47,7 +47,7 @@ AI RUN BBRI
 /ai_run BBRI
 ```
 
-- `AI CHECK` and `/ai TICKER` read only the latest completed EOD from Neon + broker SQLite; 0 LLM requests and 0 new ZAPI requests. The response explicitly says NOT RUN so it is not confused with an AI decision.
+- `AI CHECK` and `/ai TICKER` use the latest completed EOD from Neon + broker SQLite and make 0 LLM requests. Normally ZAPI usage is 0. If and only if the ticker's history is missing, disconnected, or has a gap over seven calendar days, the command repairs that one ticker through the shared cache (0 ZAPI on a cache hit, otherwise normally 1 ZAPI request) and validates again. The response reports the actual count and explicitly says NOT RUN so it is not confused with an AI decision.
 - `AI RUN` and `/ai_run TICKER` require Repository Variables `BOT1_AI_ENABLED=1` and `BOT1_AI_REMOTE=1` plus Secret `OPENAI_API_KEY`. Otherwise they return a disabled message with **no paid calls**.
 - The existing Telegram Query Worker checks whether the incoming request is from `TELEGRAM_CHAT_ID` before installing the pinned TradingAgents dependency. No heavy dependency is installed for other Bot 1 commands.
 - `AI RUN` sends the output to the existing authorized Telegram destination only. A single command can make up to 3 paid requests. Repeated commands may incur further costs; no daily price cap has been implemented.
