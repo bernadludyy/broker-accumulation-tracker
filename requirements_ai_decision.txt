@@ -1,0 +1,4 @@
+# Optional manual install only. Never included in existing production workflows.
+-r requirements_github.txt
+# Exact upstream TradingAgents v0.7.1 release commit
+tradingagents @ git+https://github.com/TauricResearch/TradingAgents.git@c4544913a14ed3df5f1ed7b9e8483270ce20682a
