@@ -62,7 +62,7 @@ CC NI TOP SELL YTD
 
 _original_command_result = legacy.command_result
 legacy.HELP_TEXT += "\n" + _HELP + "\n" + (
-    "🧠 BOT1 AI DECISION (Neon EOD, 0 ZAPI)\n"
+    "🧠 BOT1 AI DECISION (Neon EOD; repair histori maks 1 ZAPI)\n"
     "AI STATUS | AI CHECK BBRI | AI RUN BBRI\n"
     "→ CHECK: 0 AI; RUN: max 3 API calls berbayar, dinonaktifkan default.\n"
 )
