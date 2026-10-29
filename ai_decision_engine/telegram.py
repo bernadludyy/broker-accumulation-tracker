@@ -83,8 +83,20 @@ def _repair_history_and_reload(code: str, broker_db: str) -> tuple[dict, int]:
 
     before = int(tracker._GATEWAY.usage()["totals"]["upstream_attempts"])
     tracker.fetch_stock_history(code, length=tracker.CANONICAL_STOCK_HISTORY_LENGTH)
+    after_cache = int(tracker._GATEWAY.usage()["totals"]["upstream_attempts"])
+    try:
+        snapshot = load_snapshot(code, broker_db=broker_db)
+    except DataNotReady as exc:
+        # A fresh-looking shared cache can itself contain a stale/gapped payload.
+        # Bypass it once only when the cache-first attempt used no upstream call.
+        if not is_repairable_history_error(exc) or after_cache > before:
+            raise
+        tracker.refresh_stock_history(
+            code, length=tracker.CANONICAL_STOCK_HISTORY_LENGTH
+        )
+        snapshot = load_snapshot(code, broker_db=broker_db)
     after = int(tracker._GATEWAY.usage()["totals"]["upstream_attempts"])
-    return load_snapshot(code, broker_db=broker_db), max(0, after - before)
+    return snapshot, max(0, after - before)
 
 
 def format_ai_command(request: AIRequest, *, broker_db: str = "broker_tracker.db") -> str:
