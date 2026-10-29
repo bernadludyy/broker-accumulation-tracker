@@ -61,6 +61,27 @@ class Tests(unittest.TestCase):
         summary={"trade_date":day,"open_price":147,"close_price":148,"volume_shares":1200}
         with self.assertRaises(DataNotReady):
             make_snapshot("TEST",day,summary,history,[],{})
+    def test_old_suspension_gap_uses_thirty_recent_valid_sessions(self):
+        day=date(2026,10,29)
+        old=[{"trade_date":(day-timedelta(days=100-i)).isoformat(),
+              "close_price":80+i,"volume_shares":800} for i in range(30)]
+        recent=[{"trade_date":(day-timedelta(days=29-i)).isoformat(),
+                 "close_price":120+i,"volume_shares":1000+i} for i in range(29)]
+        summary={"trade_date":day,"open_price":149,"close_price":150,
+                 "volume_shares":1400}
+        snapshot=make_snapshot("TRUE",day,summary,old+recent,[],{})
+        self.assertEqual(snapshot["history_sessions"],30)
+        self.assertEqual(snapshot["history_last_date"],"2026-10-29")
+    def test_suspension_gap_with_only_twenty_nine_recent_sessions_fails(self):
+        day=date(2026,10,29)
+        old=[{"trade_date":(day-timedelta(days=100-i)).isoformat(),
+              "close_price":80+i,"volume_shares":800} for i in range(30)]
+        recent=[{"trade_date":(day-timedelta(days=28-i)).isoformat(),
+                 "close_price":120+i,"volume_shares":1000+i} for i in range(28)]
+        summary={"trade_date":day,"open_price":149,"close_price":150,
+                 "volume_shares":1400}
+        with self.assertRaisesRegex(DataNotReady,"Gap historis"):
+            make_snapshot("TRUE",day,summary,old+recent,[],{})
     def test_only_history_continuity_errors_are_repairable(self):
         self.assertTrue(is_repairable_history_error(
             DataNotReady("Gap historis lebih dari 7 hari kalender")))
