@@ -84,6 +84,21 @@ jobs:
           from project_fabric.universe_intelligence import _history
           parsed = _history(payload)
           report("PARSER_HISTORY", [row["date"] for row in parsed])
+          valid_dates = {row["date"] for row in parsed}
+          invalid = []
+          for row in items:
+              stamp = str(row.get("date") or row.get("Date") or "")[:10]
+              if stamp and stamp not in valid_dates and stamp < "2026-10-29":
+                  invalid.append({
+                      "date": stamp,
+                      "open": row.get("open", row.get("Open")),
+                      "high": row.get("high", row.get("High")),
+                      "low": row.get("low", row.get("Low")),
+                      "close": row.get("close", row.get("Close")),
+                      "volume": row.get("volume", row.get("Volume")),
+                      "keys": sorted(row.keys()),
+                  })
+          print("INVALID_SAMPLES", invalid[:5])
 
           import tracker
           print("ARCHIVE_READY", tracker._ARCHIVE.ready)
