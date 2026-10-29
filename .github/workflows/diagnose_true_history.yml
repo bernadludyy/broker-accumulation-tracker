@@ -81,9 +81,14 @@ jobs:
               for row in items if isinstance(row, dict) and (row.get("date") or row.get("Date"))
           ])
 
+          from project_fabric.universe_intelligence import _history
+          parsed = _history(payload)
+          report("PARSER_HISTORY", [row["date"] for row in parsed])
+
           import tracker
-          tracker.refresh_stock_history("TRUE", length=120)
-          print("REFRESH_FUNCTION", "COMPLETED")
+          print("ARCHIVE_READY", tracker._ARCHIVE.ready)
+          stored = tracker._ARCHIVE.save_history("TRUE", payload)
+          print("DIRECT_ARCHIVE_STORED", stored)
           neon_history("NEON_AFTER")
 
           from ai_decision_engine.__main__ import load_snapshot
