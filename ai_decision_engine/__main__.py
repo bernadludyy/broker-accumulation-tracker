@@ -18,9 +18,19 @@ WIB = ZoneInfo("Asia/Jakarta")
 CODE = re.compile(r"^[A-Z0-9]{2,12}$")
 MIN_BARS = 30
 MODEL = "gpt-4.1-mini"
+REPAIRABLE_HISTORY_ERRORS = frozenset({
+    "Histori EOD kurang dari 30 sesi",
+    "Histori tidak tersambung ke EOD",
+    "Gap historis lebih dari 7 hari kalender",
+})
 
 class DataNotReady(RuntimeError):
     pass
+
+
+def is_repairable_history_error(exc: BaseException) -> bool:
+    """Only archive-continuity failures may trigger one bounded history repair."""
+    return isinstance(exc, DataNotReady) and str(exc) in REPAIRABLE_HISTORY_ERRORS
 
 def number(value: Any) -> float | None:
     if value is None or isinstance(value, bool):
