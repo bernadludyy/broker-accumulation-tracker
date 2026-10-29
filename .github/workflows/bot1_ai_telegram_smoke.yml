@@ -1,4 +1,4 @@
-name: Bot1 AI Telegram Smoke (0 AI / 0 ZAPI)
+name: Bot1 AI Telegram Smoke (0 AI / bounded history repair)
 
 # Runs automatically only for specifically titled approved merge commits.
 on:
@@ -32,7 +32,9 @@ jobs:
       BOT1_AI_ENABLED: "0"
       BOT1_AI_REMOTE: "0"
       OPENAI_API_KEY: ""
-      ZPI_API_KEY: ""
+      # AI CHECK normally uses 0 ZAPI. A disconnected ticker history may use
+      # one cache-first repair request; the Telegram output reports the count.
+      ZPI_API_KEY: ${{ secrets.ZPI_API_KEY }}
       PYTHONUTF8: "1"
 
     steps:
@@ -56,11 +58,11 @@ jobs:
       - name: Send AI STATUS to owner private chat
         run: python broker_ytd_dispatch.py --text "AI STATUS"
 
-      - name: Send cache-only AI CHECK BBRI to owner private chat
-        run: python broker_ytd_dispatch.py --text "AI CHECK BBRI"
+      - name: Send AI CHECK TRUE and repair disconnected history if needed
+        run: python broker_ytd_dispatch.py --text "AI CHECK TRUE"
 
       - name: Verify no AI paid mode was requested
         run: |
           test "$BOT1_AI_ENABLED" = "0"
           test "$BOT1_AI_REMOTE" = "0"
-          echo "Smoke complete; 0 paid model requests and 0 ZAPI calls."
+          echo "Smoke complete; 0 paid model requests. ZAPI history repair is bounded and reported."

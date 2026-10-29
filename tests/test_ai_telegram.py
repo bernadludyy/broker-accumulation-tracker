@@ -89,6 +89,31 @@ class TelegramAITests(unittest.TestCase):
         self.assertIn("Stale EOD", out)
 
     @patch("broker_ytd_dispatch.legacy.authorized", return_value=True)
+    @patch("ai_decision_engine.telegram.decide")
+    @patch("ai_decision_engine.telegram._repair_history_and_reload")
+    @patch("ai_decision_engine.telegram.load_snapshot")
+    def test_history_gap_repairs_once_then_revalidates(
+        self, load, repair, decide, authorized
+    ):
+        load.side_effect = ai.DataNotReady("Gap historis lebih dari 7 hari kalender")
+        repair.return_value = (sample_snapshot(), 1)
+        decide.return_value = {"gate": "PASS", "gate_reasons": [],
+                               "ai_calls": 0, "action": "WAIT"}
+        out = dispatch.command_result("AI CHECK TRUE", "owner")
+        repair.assert_called_once_with("TRUE", str(dispatch.legacy.DB_PATH))
+        self.assertIn("History repair: BERHASIL (1 request ZAPI)", out)
+        self.assertIn("AI requests: 0 | ZAPI requests: 1", out)
+
+    @patch("broker_ytd_dispatch.legacy.authorized", return_value=True)
+    @patch("ai_decision_engine.telegram._repair_history_and_reload")
+    @patch("ai_decision_engine.telegram.load_snapshot")
+    def test_non_history_failure_never_fetches_zapi(self, load, repair, authorized):
+        load.side_effect = ai.DataNotReady("Cache EOD terlalu lama")
+        out = dispatch.command_result("AI CHECK TRUE", "owner")
+        repair.assert_not_called()
+        self.assertIn("ZAPI: 0", out)
+
+    @patch("broker_ytd_dispatch.legacy.authorized", return_value=True)
     def test_help_command_and_old_fallback(self, auth):
         self.assertIn("AI RUN BBRI", dispatch.command_result("AI", "owner"))
         with patch("broker_ytd_dispatch._original_command_result", return_value="LEGACY") as base:

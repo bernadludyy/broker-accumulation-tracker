@@ -5,7 +5,10 @@ from datetime import date, datetime, timedelta
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
-from ai_decision_engine.__main__ import DataNotReady, completed_day, ticker_code, make_snapshot, gate, decide, parse_decision
+from ai_decision_engine.__main__ import (
+    DataNotReady, completed_day, ticker_code, make_snapshot, gate, decide,
+    is_repairable_history_error, parse_decision,
+)
 
 def sample(bull=True, broker=True):
     day=date(2026,10,28)
@@ -58,6 +61,12 @@ class Tests(unittest.TestCase):
         summary={"trade_date":day,"open_price":147,"close_price":148,"volume_shares":1200}
         with self.assertRaises(DataNotReady):
             make_snapshot("TEST",day,summary,history,[],{})
+    def test_only_history_continuity_errors_are_repairable(self):
+        self.assertTrue(is_repairable_history_error(
+            DataNotReady("Gap historis lebih dari 7 hari kalender")))
+        self.assertFalse(is_repairable_history_error(
+            DataNotReady("Cache EOD terlalu lama")))
+        self.assertFalse(is_repairable_history_error(ValueError("bad")))
     def test_remote_requires_enable_flags(self):
         with patch.dict(os.environ,{"BOT1_AI_ENABLED":"0","BOT1_AI_REMOTE":"0"}):
             with self.assertRaises(PermissionError):
