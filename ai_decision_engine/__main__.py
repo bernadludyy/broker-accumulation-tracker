@@ -102,9 +102,20 @@ def make_snapshot(
         raise DataNotReady("Histori EOD kurang dari 30 sesi")
     if (day - date.fromisoformat(ordered[-2][0])).days > 10:
         raise DataNotReady("Histori tidak tersambung ke EOD")
-    if any((date.fromisoformat(ordered[i][0]) - date.fromisoformat(ordered[i-1][0])).days > 7
-           for i in range(1, len(ordered))):
-        raise DataNotReady("Gap historis lebih dari 7 hari kalender")
+    # A long zero-volume suspension is not a fabricated candle.  Use only the
+    # valid trading-session segment after the last long calendar gap, and still
+    # require the full indicator warm-up.  A recent/incomplete gap remains a
+    # hard failure and may trigger the bounded repair path.
+    gaps = [
+        i for i in range(1, len(ordered))
+        if (date.fromisoformat(ordered[i][0])
+            - date.fromisoformat(ordered[i - 1][0])).days > 7
+    ]
+    if gaps:
+        recent_segment = ordered[gaps[-1]:]
+        if len(recent_segment) < MIN_BARS:
+            raise DataNotReady("Gap historis lebih dari 7 hari kalender")
+        ordered = recent_segment
     closes = [x[1][0] for x in ordered]
     volumes = [x[1][1] for x in ordered]
     changes = [closes[i] - closes[i - 1] for i in range(len(closes)-14, len(closes))]
