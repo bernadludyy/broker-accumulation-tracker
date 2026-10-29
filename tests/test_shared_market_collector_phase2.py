@@ -69,6 +69,26 @@ class SharedMarketCollectorPhase2Tests(unittest.TestCase):
         self.assertEqual(payload["data"]["count"], 120)
         self.assertEqual(len(payload["data"]["items"]), 120)
 
+    def test_force_history_refresh_bypasses_then_replaces_shared_cache(self):
+        raw = {
+            "project": "finance:idx:stock-history",
+            "data": {"code": "TRUE", "items": [{"date": "2026-10-28"}]},
+        }
+        with (
+            patch.object(tracker._GATEWAY, "get_json", return_value=raw) as get_json,
+            patch.object(tracker._GATEWAY.cache, "set") as cache_set,
+            patch.object(tracker, "_headers", return_value={"x-api-key": "test"}),
+            patch.object(tracker, "_ARCHIVE") as archive,
+        ):
+            archive.ready = False
+            result = tracker.refresh_stock_history("true", length=120)
+
+        self.assertEqual(result["code"], "TRUE")
+        self.assertEqual(get_json.call_args.kwargs["policy"].ttl_seconds, 0)
+        self.assertEqual(get_json.call_args.kwargs["policy"].stale_if_error_seconds, 0)
+        cache_set.assert_called_once()
+        self.assertEqual(cache_set.call_args.args[1], raw)
+
     def test_foreign_flow_first_page_uses_canonical_length(self):
         with patch.object(tracker, "_get_idx", return_value={"data": []}) as get_idx:
             tracker.fetch_foreign_flow(length=20, start=0)

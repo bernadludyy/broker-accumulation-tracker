@@ -104,6 +104,45 @@ class TelegramAITests(unittest.TestCase):
         self.assertIn("History repair: BERHASIL (1 request ZAPI)", out)
         self.assertIn("AI requests: 0 | ZAPI requests: 1", out)
 
+    @patch("tracker.refresh_stock_history")
+    @patch("tracker.fetch_stock_history")
+    @patch("tracker._GATEWAY.usage")
+    @patch("ai_decision_engine.telegram.load_snapshot")
+    def test_bad_shared_history_cache_is_force_refreshed_once(
+        self, load, usage, cached_fetch, force_fetch
+    ):
+        usage.side_effect = [
+            {"totals": {"upstream_attempts": 0}},
+            {"totals": {"upstream_attempts": 0}},
+            {"totals": {"upstream_attempts": 1}},
+        ]
+        load.side_effect = [
+            ai.DataNotReady("Gap historis lebih dari 7 hari kalender"),
+            sample_snapshot(),
+        ]
+        snapshot, requests = ai._repair_history_and_reload("TRUE", "broker_tracker.db")
+        cached_fetch.assert_called_once_with("TRUE", length=120)
+        force_fetch.assert_called_once_with("TRUE", length=120)
+        self.assertEqual(snapshot["ticker"], "BBRI")
+        self.assertEqual(requests, 1)
+
+    @patch("tracker.refresh_stock_history")
+    @patch("tracker.fetch_stock_history")
+    @patch("tracker._GATEWAY.usage")
+    @patch("ai_decision_engine.telegram.load_snapshot")
+    def test_never_force_refreshes_after_an_upstream_attempt(
+        self, load, usage, cached_fetch, force_fetch
+    ):
+        usage.side_effect = [
+            {"totals": {"upstream_attempts": 0}},
+            {"totals": {"upstream_attempts": 1}},
+        ]
+        load.side_effect = ai.DataNotReady("Gap historis lebih dari 7 hari kalender")
+        with self.assertRaises(ai.DataNotReady):
+            ai._repair_history_and_reload("TRUE", "broker_tracker.db")
+        cached_fetch.assert_called_once_with("TRUE", length=120)
+        force_fetch.assert_not_called()
+
     @patch("broker_ytd_dispatch.legacy.authorized", return_value=True)
     @patch("ai_decision_engine.telegram._repair_history_and_reload")
     @patch("ai_decision_engine.telegram.load_snapshot")

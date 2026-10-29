@@ -15,7 +15,7 @@ import pandas as pd
 import requests
 from dotenv import load_dotenv
 from bot_io import get_json, send_message
-from project_fabric.data_gateway import DataGateway, market_policy
+from project_fabric.data_gateway import CachePolicy, DataGateway, market_policy
 from project_fabric.universe_intelligence import read_ticker as read_universe_intelligence
 from project_fabric.market_archive import MarketArchive
 
@@ -523,6 +523,41 @@ def fetch_stock_history(
                 _ARCHIVE.compute_score(ticker)
         except Exception as exc:
             print(f"[MARKET-ARCHIVE-WARN] history {ticker}: {type(exc).__name__}")
+    if requested >= upstream_length:
+        return payload
+    return _trim_stock_history_payload(payload, requested)
+
+
+def refresh_stock_history(
+    ticker: str,
+    length: int = CANONICAL_STOCK_HISTORY_LENGTH,
+) -> dict:
+    """Force one validated upstream history refresh and replace shared cache.
+
+    This is deliberately separate from the normal cache-first collector.  It is
+    used only after a cached payload has failed Bot 1's strict continuity check.
+    """
+    ticker = ticker.upper().strip()
+    requested = max(1, int(length))
+    upstream_length = max(CANONICAL_STOCK_HISTORY_LENGTH, requested)
+    params = {"code": ticker, "length": upstream_length}
+    raw_payload = _GATEWAY.get_json(
+        endpoint="idx:stock-history",
+        url=f"{ZPI_IDX_BASE_URL}/stock-history",
+        headers=_headers(),
+        params=params,
+        timeout=30,
+        policy=CachePolicy(),
+    )
+    payload = _unwrap_project_payload(raw_payload)
+    if not isinstance(payload, dict) or not payload.get("items"):
+        raise RuntimeError(f"stock-history {ticker} missing/invalid")
+    # Replace the bad/stale canonical cache only after validating the payload.
+    _GATEWAY.cache.set(DataGateway._cache_key("idx:stock-history", params), raw_payload)
+    if _ARCHIVE.ready:
+        stored = _ARCHIVE.save_history(ticker, payload)
+        if stored:
+            _ARCHIVE.compute_score(ticker)
     if requested >= upstream_length:
         return payload
     return _trim_stock_history_payload(payload, requested)
