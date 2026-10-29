@@ -12,6 +12,7 @@ from broker_stalker import ALLOWED_LOOKBACKS, format_broker_stalker
 from bandar_momentum import format_bandar_momentum
 from bull_divergence import format_bull_divergence
 from market_combos import format_market_combo
+from quality_trend import format_quality_trend
 
 
 _HELP = """
@@ -30,6 +31,11 @@ BULL DIV 10
 BULL DIV BBRI
 → Regular bullish divergence: harga lower low + RSI14 higher low dari pivot EOD Neon.
 → /bulldiv adalah alias; screener cache-only, 0 ZAPI.
+RATIO TREND
+RATIO TREND 10
+RATIO TREND BBRI
+→ Semua rule quality-ratio + MA20>MA50>MA200, lalu RSI/MACD/volume/foreign/R:R.
+→ QUALITY TREND dan /ratiotrend adalah alias; EOD Neon, 0 ZAPI.
 MARKET COMBO 2 LIVE
 → Top Value ∩ Top Frequency, lalu konfirmasi bid/offer saat bursa berjalan.
 MARKET COMBO 2 EOD
@@ -111,6 +117,30 @@ def command_result(text: str, chat_id: str) -> str:
         if legacy.TICKER_RE.fullmatch(option):
             return format_bull_divergence(ticker=option, limit=1)
         return "Format: BULL DIV [1-15|TICKER]"
+
+    is_ratio_trend = (
+        (
+            first in {"ratio", "quality"}
+            and len(parts) >= 2
+            and parts[1].upper() == "TREND"
+        )
+        or first in {
+            "/ratiotrend", "ratiotrend", "/ratio_trend", "ratio_trend",
+            "/qualitytrend", "qualitytrend", "/quality_trend", "quality_trend",
+        }
+    )
+    if is_ratio_trend:
+        options = parts[2:] if first in {"ratio", "quality"} else parts[1:]
+        if len(options) > 1:
+            return "Format: RATIO TREND [1-15|TICKER]"
+        if not options:
+            return format_quality_trend(limit=10)
+        option = options[0].strip().upper()
+        if option.isdigit() and 1 <= int(option) <= 15:
+            return format_quality_trend(limit=int(option))
+        if legacy.TICKER_RE.fullmatch(option):
+            return format_quality_trend(ticker=option, limit=1)
+        return "Format: RATIO TREND [1-15|TICKER]"
 
     if first == "market" and len(parts) >= 2 and parts[1].upper() == "COMBO":
         format_hint = "Format: MARKET COMBO [1|2] [LIVE|EOD] [1-10]"
