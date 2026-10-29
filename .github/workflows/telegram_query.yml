@@ -39,6 +39,8 @@ jobs:
       DB_PATH: broker_tracker.db
       ZAPI_SLEEP_SECONDS: "1.0"
       PYTHONUTF8: "1"
+      BOT1_AI_ENABLED: ${{ vars.BOT1_AI_ENABLED }}
+      BOT1_AI_REMOTE: ${{ vars.BOT1_AI_REMOTE }}
 
     steps:
       - name: Checkout repository
@@ -56,13 +58,34 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements_github.txt
 
+      - name: Detect authorized paid AI request (no API calls)
+        id: ai_mode
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          MANUAL_TEXT: ${{ inputs.text }}
+          MANUAL_CHAT_ID: ${{ inputs.chat_id }}
+        run: python -m scripts.ai_request_gate >> "$GITHUB_OUTPUT"
+
+      - name: Install TradingAgents only for opted-in owner AI RUN
+        if: steps.ai_mode.outputs.remote == 'true'
+        env:
+          PROJECT_FABRIC_DATABASE_URL: ""
+          ZPI_API_KEY: ""
+          TELEGRAM_BOT_TOKEN: ""
+          TELEGRAM_CHAT_ID: ""
+          OPENAI_API_KEY: ""
+        run: python -m pip install -r requirements_ai_decision.txt
+
       - name: Process Telegram repository_dispatch
         if: github.event_name == 'repository_dispatch'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: python broker_ytd_dispatch.py --event-file "$GITHUB_EVENT_PATH"
 
       - name: Manual query test
         if: github.event_name == 'workflow_dispatch'
         env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           MANUAL_TEXT: ${{ inputs.text }}
           MANUAL_CHAT_ID: ${{ inputs.chat_id }}
         run: |

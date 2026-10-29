@@ -35,3 +35,27 @@ Remote mode: at most 3 LLM requests per run, up to 350 generated tokens/request,
 Then review CI on draft PR, check Neon dry-run data freshness using a read-only credential, and measure token consumption for one remote ticker. Compare decisions with Bot 1 rule-based analysis and run out-of-sample paper trading with fees/slippage. Do not merge, deploy, or enable automatic alerts before validation.
 
 Known limits: No intraday data, no full TradingAgents graph, no direct trade execution, no portfolio position sizing, and no proof of profitability.
+
+
+## Telegram commands (owner's private chat only)
+```
+AI STATUS
+AI CHECK BBRI
+/ai ADRO
+BOT1 AI CHECK DSSA
+AI RUN BBRI
+/ai_run BBRI
+```
+
+- `AI CHECK` and `/ai TICKER` read only the latest completed EOD from Neon + broker SQLite; 0 LLM requests and 0 new ZAPI requests. The response explicitly says NOT RUN so it is not confused with an AI decision.
+- `AI RUN` and `/ai_run TICKER` require Repository Variables `BOT1_AI_ENABLED=1` and `BOT1_AI_REMOTE=1` plus Secret `OPENAI_API_KEY`. Otherwise they return a disabled message with **no paid calls**.
+- The existing Telegram Query Worker checks whether the incoming request is from `TELEGRAM_CHAT_ID` before installing the pinned TradingAgents dependency. No heavy dependency is installed for other Bot 1 commands.
+- `AI RUN` sends the output to the existing authorized Telegram destination only. A single command can make up to 3 paid requests. Repeated commands may incur further costs; no daily price cap has been implemented.
+- No additional schedule, market refresh, Neon write, automatic order, or default paid activation was added. Non-AI Bot 1 commands remain on their current route.
+- Test before enabling paid RUN: use `AI CHECK` with a known EOD and inspect the gateway freshness, broker dates, pricing and hard-gate behavior. Optional CLI smoke tests with v0.7.1 client belong in a disposable environment.
+
+## Tests
+```
+python -m unittest discover -s tests -p 'test_ai_telegram.py' -v
+python -m unittest discover -s tests -v
+```

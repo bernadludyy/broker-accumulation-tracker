@@ -13,6 +13,7 @@ from bandar_momentum import format_bandar_momentum
 from bull_divergence import format_bull_divergence
 from market_combos import format_market_combo
 from quality_trend import format_quality_trend
+from ai_decision_engine.telegram import format_ai_command, parse_ai_command
 
 
 _HELP = """
@@ -60,13 +61,24 @@ CC NI TOP SELL YTD
 """
 
 _original_command_result = legacy.command_result
-legacy.HELP_TEXT += "\n" + _HELP
+legacy.HELP_TEXT += "\n" + _HELP + "\n" + (
+    "🧠 BOT1 AI DECISION (Neon EOD, 0 ZAPI)\n"
+    "AI STATUS | AI CHECK BBRI | AI RUN BBRI\n"
+    "→ CHECK: 0 AI; RUN: max 3 API calls berbayar, dinonaktifkan default.\n"
+)
 
 
 def command_result(text: str, chat_id: str) -> str:
     parts = text.strip().split()
     if not parts:
         return _original_command_result(text, chat_id)
+
+    # Read-only check by default. Legacy owner authorization is checked BEFORE DB/LLM.
+    ai_request = parse_ai_command(text)
+    if ai_request is not None:
+        if not legacy.authorized(chat_id):
+            return "⛔ AI Decision hanya tersedia untuk chat pribadi pemilik bot."
+        return format_ai_command(ai_request, broker_db=str(legacy.DB_PATH))
 
     first = parts[0].split("@")[0].lower()
     is_bandar_momentum = (
