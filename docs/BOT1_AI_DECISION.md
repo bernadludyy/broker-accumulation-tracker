@@ -6,7 +6,7 @@ This module is an isolated, OFF-BY-DEFAULT research layer. No Telegram integrati
 
 The original TradingAgentsGraph for stocks reads from external Yahoo/SEC sources. That would violate the requested cache-only IDX setup. Instead this pilot imports the OFFICIAL TradingAgents v0.7.1 LLM client factory and creates three narrowly scoped analyst prompts: Bull Researcher, Bear Researcher, Risk Manager. It is not the full upstream graph or its backtest.
 
-Neon sources: project_fabric.stock_summary_daily and project_fabric.stock_history_daily. A single REPEATABLE READ READ ONLY transaction limits data to a completed EOD day. SQLite broker_daily is also read-only. The source is historical ZAPI-derived cache, but ZAPI requests = 0.
+Neon sources: project_fabric.stock_summary_daily and project_fabric.stock_history_daily. Their verified completed EOD bars are merged by date (daily summary overrides duplicate older history), closing recent historical-archive gaps without ZAPI calls. Any internal gap over 7 calendar days is rejected. A single REPEATABLE READ READ ONLY transaction limits data to a completed EOD day. SQLite broker_daily is also read-only. The source is historical ZAPI-derived cache, but ZAPI requests = 0.
 
 Point-in-time guards require at least 30 price sessions, matching completed summary, a recent broker snapshot with >=3 sessions, positive indicative broker net activity, bullish market regime, price above MA20, valid volume, and RSI less than 80. Missing data causes WAIT, not invented values. Broker net buy is transaction activity, NOT holdings. Financial statements are omitted pending publication-time verification.
 
@@ -29,7 +29,7 @@ Remote mode: at most 3 LLM requests per run, up to 350 generated tokens/request,
 
 ## Test and release gates
 
-    python -m unittest tests.test_ai_decision_engine -v
+    python -m unittest discover -s tests -p test_ai_decision_engine.py -v
     python -m unittest discover -s tests -v
 
 Then review CI on draft PR, check Neon dry-run data freshness using a read-only credential, and measure token consumption for one remote ticker. Compare decisions with Bot 1 rule-based analysis and run out-of-sample paper trading with fees/slippage. Do not merge, deploy, or enable automatic alerts before validation.

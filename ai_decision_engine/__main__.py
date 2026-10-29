@@ -92,6 +92,9 @@ def make_snapshot(
         raise DataNotReady("Histori EOD kurang dari 30 sesi")
     if (day - date.fromisoformat(ordered[-2][0])).days > 10:
         raise DataNotReady("Histori tidak tersambung ke EOD")
+    if any((date.fromisoformat(ordered[i][0]) - date.fromisoformat(ordered[i-1][0])).days > 7
+           for i in range(1, len(ordered))):
+        raise DataNotReady("Gap historis lebih dari 7 hari kalender")
     closes = [x[1][0] for x in ordered]
     volumes = [x[1][1] for x in ordered]
     changes = [closes[i] - closes[i - 1] for i in range(len(closes)-14, len(closes))]
@@ -146,6 +149,15 @@ def load_snapshot(ticker: str, date_text: str | None = None, broker_db: str = "b
                    WHERE ticker=%s AND trade_date<=%s
                    ORDER BY trade_date DESC LIMIT 60""", (code, actual))
             history = [dict(zip(("trade_date","close_price","volume_shares"),r)) for r in cur.fetchall()]
+            # Completed daily summaries fill gaps in the slower-moving stock-history archive.
+            # Only dates <= actual EOD are read; no ZAPI request or future candle.
+            cur.execute(
+                """SELECT trade_date,close_price,volume_shares
+                   FROM project_fabric.stock_summary_daily
+                   WHERE ticker=%s AND trade_date<=%s
+                   ORDER BY trade_date DESC LIMIT 60""", (code, actual))
+            history.extend(dict(zip(("trade_date","close_price","volume_shares"),r))
+                           for r in cur.fetchall())
             cur.execute("SELECT raw_json FROM project_fabric.stock_summary_daily WHERE trade_date=%s", (actual,))
             universe = [r[0] for r in cur.fetchall() if isinstance(r[0], dict)]
     return make_snapshot(code, actual, summary, history, universe, broker_metrics(code, actual, broker_db))

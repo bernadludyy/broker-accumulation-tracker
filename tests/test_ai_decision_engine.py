@@ -49,6 +49,15 @@ class Tests(unittest.TestCase):
         with patch.dict(os.environ,{"BOT1_AI_ENABLED":"1","BOT1_AI_REMOTE":"1"}):
             d=decide(s,remote=True,invoke=lambda _:self.fail("API must not be called"))
         self.assertEqual(d["action"],"WAIT")
+    def test_internal_history_gap_fails_closed(self):
+        day=date(2026,10,28)
+        history=[{"trade_date":(day-timedelta(days=50-i)).isoformat(),
+                  "close_price":110+i,"volume_shares":1000} for i in range(35)]
+        history.append({"trade_date":(day-timedelta(days=1)).isoformat(),
+                        "close_price":146,"volume_shares":1000})
+        summary={"trade_date":day,"open_price":147,"close_price":148,"volume_shares":1200}
+        with self.assertRaises(DataNotReady):
+            make_snapshot("TEST",day,summary,history,[],{})
     def test_remote_requires_enable_flags(self):
         with patch.dict(os.environ,{"BOT1_AI_ENABLED":"0","BOT1_AI_REMOTE":"0"}):
             with self.assertRaises(PermissionError):
