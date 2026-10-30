@@ -86,6 +86,7 @@ def migrate(database_url: str | None = None) -> None:
             transaction_date DATE,
             person_name TEXT,
             person_role TEXT,
+            party_category TEXT NOT NULL DEFAULT 'UNKNOWN',
             side TEXT NOT NULL DEFAULT 'UNKNOWN'
                 CHECK (side IN ('BUY', 'SELL', 'UNKNOWN')),
             shares NUMERIC,
@@ -103,6 +104,10 @@ def migrate(database_url: str | None = None) -> None:
             raw_json JSONB NOT NULL DEFAULT '{}'::jsonb,
             collected_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )
+        """,
+        """
+        ALTER TABLE project_fabric.insider_disclosures
+        ADD COLUMN IF NOT EXISTS party_category TEXT NOT NULL DEFAULT 'UNKNOWN'
         """,
         """
         CREATE INDEX IF NOT EXISTS idx_insider_disclosures_ticker_date
@@ -243,8 +248,16 @@ def _percentage(value: str | None) -> Decimal | None:
 
 def _capture(text: str, labels: Iterable[str], value_pattern: str = r"([^\n]{1,160})") -> str | None:
     label_pattern = "|".join(re.escape(label) for label in labels)
-    match = re.search(rf"(?:{label_pattern})\s*[:\-]?\s*{value_pattern}", text, re.I)
-    return _clean_text(match.group(1)) if match else None
+    # Empty fields must not consume the next form label on a new line.
+    match = re.search(rf"(?:{label_pattern})[ \t]*[:\-]?[ \t]*{value_pattern}", text, re.I)
+    if not match:
+        return None
+    value = _clean_text(match.group(1))
+    return value if value.strip(" :-") else None
+
+
+def _yes(value: str | None) -> bool:
+    return bool(value and re.match(r"^(ya|yes)\b", value.strip(), re.I))
 
 
 _MONTHS = {
@@ -349,6 +362,20 @@ def parse_disclosure(item: dict[str, Any], text: str = "") -> dict[str, Any]:
         purpose = _clean_text(table_row.group("purpose")).split("Saya bertanggung", 1)[0].strip()
     before_pct = _percentage(_capture(clean, ("persentase kepemilikan sebelum transaksi",)))
     after_pct = _percentage(_capture(clean, ("persentase kepemilikan setelah transaksi",)))
+    if before_pct is None:
+        before_pct = _percentage(_capture(clean, ("hak suara sebelum transaksi",)))
+    if after_pct is None:
+        after_pct = _percentage(_capture(clean, ("hak suara setelah transaksi",)))
+    board_member = _yes(_capture(clean, ("anggota direksi/dewan komisaris",)))
+    controller = _yes(_capture(clean, ("keterangan pengendali",)))
+    if board_member:
+        party_category = "BOARD"
+    elif controller:
+        party_category = "CONTROLLER"
+    elif max(before_pct or Decimal(0), after_pct or Decimal(0)) >= Decimal(5):
+        party_category = "MAJOR_HOLDER"
+    else:
+        party_category = "OTHER_DISCLOSER"
 
     structured = bool(
         person and side != "UNKNOWN" and transaction_date
@@ -361,6 +388,7 @@ def parse_disclosure(item: dict[str, Any], text: str = "") -> dict[str, Any]:
         "transaction_date": transaction_date,
         "person_name": person,
         "person_role": role,
+        "party_category": party_category,
         "side": side,
         "shares": shares,
         "price": price,
@@ -392,12 +420,12 @@ def _upsert(cur, row: dict[str, Any]) -> None:
         """
         INSERT INTO project_fabric.insider_disclosures (
             disclosure_id, ticker, published_at, transaction_date, person_name,
-            person_role, side, shares, price, transaction_value, shares_before,
+            person_role, party_category, side, shares, price, transaction_value, shares_before,
             shares_after, ownership_before_pct, ownership_after_pct, purpose,
             announcement_title, source_url, parse_status, raw_json, collected_at
         ) VALUES (
             %(disclosure_id)s, %(ticker)s, %(published_at)s, %(transaction_date)s,
-            %(person_name)s, %(person_role)s, %(side)s, %(shares)s, %(price)s,
+            %(person_name)s, %(person_role)s, %(party_category)s, %(side)s, %(shares)s, %(price)s,
             %(transaction_value)s, %(shares_before)s, %(shares_after)s,
             %(ownership_before_pct)s, %(ownership_after_pct)s, %(purpose)s,
             %(announcement_title)s, %(source_url)s, %(parse_status)s,
@@ -409,6 +437,7 @@ def _upsert(cur, row: dict[str, Any]) -> None:
             transaction_date = EXCLUDED.transaction_date,
             person_name = EXCLUDED.person_name,
             person_role = EXCLUDED.person_role,
+            party_category = EXCLUDED.party_category,
             side = EXCLUDED.side,
             shares = EXCLUDED.shares,
             price = EXCLUDED.price,
@@ -550,7 +579,7 @@ def read_insider(ticker: str, limit: int = 5, database_url: str | None = None) -
         cur.execute(
             """
             SELECT disclosure_id, ticker, published_at, transaction_date, person_name,
-                   person_role, side, shares, price, transaction_value, shares_before,
+                   person_role, party_category, side, shares, price, transaction_value, shares_before,
                    shares_after, ownership_before_pct, ownership_after_pct, purpose,
                    announcement_title, source_url, parse_status, collected_at
             FROM project_fabric.insider_disclosures
@@ -629,6 +658,12 @@ def format_insider_report(
             f"{index}. {side} | {event_date.isoformat() if event_date else 'Tanggal N/A'}",
             f"Pihak: {row.get('person_name') or 'lihat laporan'}"
             + (f" ({row['person_role']})" if row.get("person_role") else ""),
+            "Kategori: " + {
+                "BOARD": "Direksi/Komisaris",
+                "CONTROLLER": "Pengendali",
+                "MAJOR_HOLDER": "Pemegang saham ≥5%",
+                "OTHER_DISCLOSER": "Pelapor lain (tidak masuk ringkasan insider)",
+            }.get(row.get("party_category"), "Belum terklasifikasi"),
             f"Saham: {_fmt_number(row.get('shares'))} lembar | Harga: Rp{_fmt_number(row.get('price'))}",
             f"Nilai indikatif: Rp{_fmt_number(row.get('transaction_value'))}",
             f"Status parsing: {row.get('parse_status')}",
@@ -636,8 +671,15 @@ def format_insider_report(
         if row.get("source_url"):
             lines.append(f"Dokumen: {row['source_url']}")
 
-    buys = sum(float(row.get("transaction_value") or 0) for row in rows if row.get("side") == "BUY")
-    sells = sum(float(row.get("transaction_value") or 0) for row in rows if row.get("side") == "SELL")
+    official_insiders = {"BOARD", "CONTROLLER", "MAJOR_HOLDER"}
+    buys = sum(
+        float(row.get("transaction_value") or 0) for row in rows
+        if row.get("side") == "BUY" and row.get("party_category") in official_insiders
+    )
+    sells = sum(
+        float(row.get("transaction_value") or 0) for row in rows
+        if row.get("side") == "SELL" and row.get("party_category") in official_insiders
+    )
     known = buys or sells
     conclusion = "Akumulasi insider resmi" if buys > sells else "Distribusi insider resmi" if sells > buys else "Belum dapat disimpulkan"
     lines.extend([
