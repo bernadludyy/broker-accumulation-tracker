@@ -63,3 +63,11 @@ jobs:
           else
             python -m scripts.insider_collect --pages "${INPUT_PAGES:-1}"
           fi
+
+      - name: One-time end-to-end Telegram smoke
+        if: github.event_name == 'push'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DB_PATH: broker_tracker.db
+        run: python broker_ytd_dispatch.py --text "INSIDER REFRESH BBRI"
