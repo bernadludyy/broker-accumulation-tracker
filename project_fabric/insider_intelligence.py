@@ -205,11 +205,26 @@ def _clean_text(value: str) -> str:
 def _number(value: str | None) -> Decimal | None:
     if not value:
         return None
-    digits = re.sub(r"[^0-9-]", "", value)
-    if not digits or digits == "-":
+    match = re.search(r"-?\d[\d.,]*", value)
+    if not match:
         return None
+    token = match.group(0)
+    # IDX/KSEI reports use Indonesian formatting: 1.100.000,00.  Keeping the
+    # decimal suffix as digits would inflate shares and prices by 100x.
+    if "." in token and "," in token:
+        token = token.replace(".", "").replace(",", ".")
+    elif token.count(".") > 1:
+        token = token.replace(".", "")
+    elif token.count(",") > 1:
+        token = token.replace(",", "")
+    elif "," in token:
+        whole, fraction = token.rsplit(",", 1)
+        token = whole.replace(".", "") + (f".{fraction}" if len(fraction) <= 2 else fraction)
+    elif "." in token:
+        whole, fraction = token.rsplit(".", 1)
+        token = whole.replace(".", "") + (fraction if len(fraction) == 3 else f".{fraction}")
     try:
-        return Decimal(digits)
+        return Decimal(token)
     except Exception:
         return None
 
@@ -236,6 +251,8 @@ _MONTHS = {
     "januari": 1, "februari": 2, "maret": 3, "april": 4, "mei": 5, "juni": 6,
     "juli": 7, "agustus": 8, "september": 9, "oktober": 10, "november": 11,
     "desember": 12,
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "jun": 6, "jul": 7, "agu": 8,
+    "ags": 8, "sep": 9, "okt": 10, "nov": 11, "des": 12,
 }
 
 
@@ -283,10 +300,28 @@ def parse_disclosure(item: dict[str, Any], text: str = "") -> dict[str, Any]:
         "jumlah saham yang dibeli", "jumlah saham yang dijual", "jumlah saham transaksi",
         "jumlah saham yang diperoleh", "jumlah saham yang dialihkan",
     )))
+
+    # Current AKSes/KSEI PDFs render the transaction as a table.  PDF text
+    # extraction separates the headers from the row, so parse that row before
+    # falling back to before/after ownership differences.
+    table_row = re.search(
+        r"\b(?P<side>Pembelian|Penjualan)\b"
+        r"(?P<body>.{0,420}?)"
+        r"(?P<shares>\d[\d.]*,\d{2})\s+Saham\s+Biasa\s+"
+        r"(?P<price>\d[\d.]*,\d{2})\s+"
+        r"(?P<day>[0-3]?\d)-\s*(?P<month>[A-Za-z]+)-\s*(?P<year>20\d{2})"
+        r"\s+(?P<purpose>[^\n]{1,80})",
+        clean,
+        re.I | re.S,
+    )
+    if table_row:
+        shares = _number(table_row.group("shares"))
     if shares is None and before is not None and after is not None:
         shares = abs(after - before)
 
-    if re.search(r"\b(penjualan|menjual|dijual|divestasi)\b", lower):
+    if table_row:
+        side = "BUY" if table_row.group("side").lower() == "pembelian" else "SELL"
+    elif re.search(r"\b(penjualan|menjual|dijual|divestasi)\b", lower):
         side = "SELL"
     elif re.search(r"\b(pembelian|membeli|dibeli|akuisisi)\b", lower):
         side = "BUY"
@@ -299,19 +334,26 @@ def parse_disclosure(item: dict[str, Any], text: str = "") -> dict[str, Any]:
         "harga pembelian per saham", "harga penjualan per saham", "harga transaksi per saham",
         "harga pembelian", "harga penjualan", "harga transaksi",
     )))
+    if table_row:
+        price = _number(table_row.group("price"))
     value = shares * price if shares is not None and price is not None else None
 
-    person = _capture(clean, (
-        "nama pemilik saham", "nama pemegang saham", "nama direksi/komisaris",
-        "nama anggota direksi", "nama anggota dewan komisaris",
-    ))
+    person = _capture(clean, ("nama (sesuai SID)", "name (SID)", "nama pemilik saham"))
     role = _capture(clean, ("jabatan", "status pihak", "kedudukan"))
     purpose = _capture(clean, ("tujuan transaksi", "tujuan dari transaksi"))
     transaction_date = _date_value(_capture(clean, ("tanggal transaksi", "tanggal pelaksanaan transaksi")))
+    if table_row:
+        transaction_date = _date_value(
+            f"{table_row.group('day')} {table_row.group('month')} {table_row.group('year')}"
+        )
+        purpose = _clean_text(table_row.group("purpose")).split("Saya bertanggung", 1)[0].strip()
     before_pct = _percentage(_capture(clean, ("persentase kepemilikan sebelum transaksi",)))
     after_pct = _percentage(_capture(clean, ("persentase kepemilikan setelah transaksi",)))
 
-    structured = side != "UNKNOWN" and any(value is not None for value in (shares, before, after, price))
+    structured = bool(
+        person and side != "UNKNOWN" and transaction_date
+        and shares is not None and shares > 0
+    )
     return {
         "disclosure_id": _event_id(item),
         "ticker": _ticker(item),
@@ -414,6 +456,7 @@ def ingest_payloads(
     scope: str,
     zapi_calls: int,
     download_pdfs: bool = True,
+    replace_existing: bool = False,
     database_url: str | None = None,
 ) -> CollectionResult:
     url = database_url or _require_db()
@@ -427,7 +470,7 @@ def ingest_payloads(
     with _connect(url) as con, con.cursor() as cur:
         existing = _existing_ids(cur, ids)
         for item in candidates:
-            if _event_id(item) in existing:
+            if _event_id(item) in existing and not replace_existing:
                 continue
             text = _extract_embedded_text(item)
             source_url = _source_url(item)
@@ -447,7 +490,7 @@ def ingest_payloads(
             checked_at=checked_at,
             matched=len(candidates),
             stored=stored,
-            skipped_existing=sum(1 for event_id in ids if event_id in existing),
+            skipped_existing=(0 if replace_existing else sum(1 for event_id in ids if event_id in existing)),
             zapi_calls=zapi_calls,
             pdf_errors=pdf_errors,
         )
@@ -463,7 +506,8 @@ def collect_ticker(ticker: str, *, database_url: str | None = None) -> Collectio
         raise ValueError("Ticker tidak valid")
     payload = fetch_company_announcements(code, length=100)
     return ingest_payloads(
-        [payload], scope=f"TICKER:{code}", zapi_calls=1, database_url=database_url
+        [payload], scope=f"TICKER:{code}", zapi_calls=1, replace_existing=True,
+        database_url=database_url
     )
 
 

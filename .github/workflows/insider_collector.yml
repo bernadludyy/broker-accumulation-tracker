@@ -1,10 +1,6 @@
 name: BOT1 Insider Disclosure Collector
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/insider_collector.yml"
   schedule:
     # 11:30, 16:30, 20:30 WIB on weekdays. Disclosure-based, not live market data.
     - cron: "30 4,9,13 * * 1-5"
@@ -64,10 +60,3 @@ jobs:
             python -m scripts.insider_collect --pages "${INPUT_PAGES:-1}"
           fi
 
-      - name: One-time end-to-end Telegram smoke
-        if: github.event_name == 'push'
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          DB_PATH: broker_tracker.db
-        run: python broker_ytd_dispatch.py --text "INSIDER REFRESH BBRI"
