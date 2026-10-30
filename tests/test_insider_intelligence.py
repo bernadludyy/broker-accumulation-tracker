@@ -56,6 +56,7 @@ Jumlah saham setelah transaksi: 1.500.000
         item = {"id": "ksei-1", "code": "BBRI", "title": "Laporan Kepemilikan Saham"}
         row = parse_disclosure(item, """
 Nama (sesuai SID) : ALEXANDER DIPPO PARIS Y S
+Anggota Direksi/Dewan Komisaris : Ya
 Jabatan : Direksi
 Jumlah Saham Sebelum Transaksi : 815.000,00 Unit
 Jumlah Saham Setelah Transaksi : 1.915.000,00 Unit
@@ -71,11 +72,28 @@ Saya bertanggung jawab penuh
 """)
         self.assertEqual(row["person_name"], "ALEXANDER DIPPO PARIS Y S")
         self.assertEqual(row["person_role"], "Direksi")
+        self.assertEqual(row["party_category"], "BOARD")
         self.assertEqual(row["shares"], Decimal("1100000.00"))
         self.assertEqual(row["price"], Decimal("2700.00"))
         self.assertEqual(row["transaction_value"], Decimal("2970000000.0000"))
         self.assertEqual(row["transaction_date"].isoformat(), "2026-10-16")
         self.assertEqual(row["parse_status"], "STRUCTURED")
+
+    def test_non_board_small_holder_is_excluded_from_insider_summary(self):
+        item = {"id": "other-1", "code": "BBRI", "title": "Laporan Kepemilikan Saham"}
+        row = parse_disclosure(item, """
+Nama (sesuai SID) : ALEXANDER DIPPO PARIS Y S
+Anggota Direksi/Dewan Komisaris : Tidak
+Jabatan :
+Alamat Identitas : Tidak ditampilkan
+Jumlah Saham Sebelum Transaksi : 0,00 Unit
+Hak Suara Sebelum Transaksi : 0,00%
+Jumlah Saham Setelah Transaksi : 815.000,00 Unit
+Hak Suara Setelah Transaksi : 0,00%
+Pembelian Tidak Langsung - - - 815.000,00 Saham Biasa 2.940,00 03-Jun-2026 Investasi
+""")
+        self.assertIsNone(row["person_role"])
+        self.assertEqual(row["party_category"], "OTHER_DISCLOSER")
 
 
 class InsiderTelegramTests(unittest.TestCase):
