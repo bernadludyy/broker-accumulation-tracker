@@ -52,6 +52,31 @@ Jumlah saham setelah transaksi: 1.500.000
         self.assertEqual(row["side"], "SELL")
         self.assertEqual(row["shares"], Decimal("500000"))
 
+    def test_parses_current_ksei_table_layout_without_100x_inflation(self):
+        item = {"id": "ksei-1", "code": "BBRI", "title": "Laporan Kepemilikan Saham"}
+        row = parse_disclosure(item, """
+Nama (sesuai SID) : ALEXANDER DIPPO PARIS Y S
+Jabatan : Direksi
+Jumlah Saham Sebelum Transaksi : 815.000,00 Unit
+Jumlah Saham Setelah Transaksi : 1.915.000,00 Unit
+Tujuan
+Transaksi
+Pembelian Tidak Langsung - - - 1.100.000,00 Saham
+Biasa 2.700,00
+16-
+Okt-
+2026
+Investasi
+Saya bertanggung jawab penuh
+""")
+        self.assertEqual(row["person_name"], "ALEXANDER DIPPO PARIS Y S")
+        self.assertEqual(row["person_role"], "Direksi")
+        self.assertEqual(row["shares"], Decimal("1100000.00"))
+        self.assertEqual(row["price"], Decimal("2700.00"))
+        self.assertEqual(row["transaction_value"], Decimal("2970000000.0000"))
+        self.assertEqual(row["transaction_date"].isoformat(), "2026-10-16")
+        self.assertEqual(row["parse_status"], "STRUCTURED")
+
 
 class InsiderTelegramTests(unittest.TestCase):
     @patch("broker_ytd_dispatch.format_insider_report", return_value="INSIDER REPORT")
