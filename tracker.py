@@ -466,6 +466,57 @@ def fetch_stock_summary(
             print(f"[MARKET-ARCHIVE-WARN] summary: {type(exc).__name__}")
     return payload
 
+
+def fetch_announcements(
+    page: int = 1,
+    length: int = 100,
+    locale: str = "id",
+) -> dict:
+    """Fetch the latest IDX disclosures for the global insider collector."""
+    return _get_idx(
+        "announcements",
+        {
+            "page": max(1, int(page)),
+            "length": max(1, min(int(length), 100)),
+            "locale": locale,
+        },
+        timeout=45,
+    )
+
+
+def fetch_company_announcements(
+    ticker: str,
+    length: int = 100,
+    start: int = 0,
+    locale: str = "id",
+) -> dict:
+    """Fetch one issuer's IDX disclosures; attachment URLs are always included."""
+    return _get_idx(
+        "company-announcements",
+        {
+            "code": ticker.upper().strip(),
+            "length": max(1, min(int(length), 100)),
+            "start": max(0, int(start)),
+            "locale": locale,
+        },
+        timeout=45,
+    )
+
+
+def fetch_ownership_files(
+    category: str | None = None,
+    length: int = 100,
+    start: int = 0,
+) -> dict:
+    """Fetch KSEI ownership publication file metadata (not transaction contents)."""
+    params: dict = {
+        "length": max(1, min(int(length), 200)),
+        "start": max(0, int(start)),
+    }
+    if category:
+        params["category"] = category
+    return _get_idx("ownership-files", params, timeout=45)
+
 CANONICAL_STOCK_HISTORY_LENGTH = 120
 
 

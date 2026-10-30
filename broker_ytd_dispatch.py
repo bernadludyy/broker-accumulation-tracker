@@ -14,6 +14,7 @@ from bull_divergence import format_bull_divergence
 from market_combos import format_market_combo
 from quality_trend import format_quality_trend
 from ai_decision_engine.telegram import format_ai_command, parse_ai_command
+from project_fabric.insider_intelligence import format_insider_report
 
 
 _HELP = """
@@ -48,6 +49,11 @@ MARKET COMBO 1 EOD
 → Opsional limit 1–10. Tanpa LIVE/EOD tetap memakai LIVE.
 BROKER PERSIST BBRI
 → Persistensi broker 5/10/20 sesi cache, net buy terkini vs YTD, intensitas.
+INSIDER BBRI
+→ Baca disclosure Direksi/Komisaris/Pengendali resmi dari cache Neon; 0 ZAPI.
+INSIDER REFRESH BBRI
+→ Pemeriksaan khusus satu emiten; owner-only, maksimal 1 ZAPI lalu simpan ke Neon.
+→ Data disclosure tertunda; tidak disamakan dengan broker/order flow live.
 BROKER TOP BBRI YTD
 → Top 3 broker Net Buy + Net Sell untuk satu saham.
 CC NI TOP YTD
@@ -81,6 +87,25 @@ def command_result(text: str, chat_id: str) -> str:
         return format_ai_command(ai_request, broker_db=str(legacy.DB_PATH))
 
     first = parts[0].split("@")[0].lower()
+
+    if first in {"insider", "/insider"}:
+        format_hint = "Format: INSIDER BBRI [1-10] atau INSIDER REFRESH BBRI [1-10]"
+        refresh = len(parts) >= 2 and parts[1].upper() == "REFRESH"
+        ticker_index = 2 if refresh else 1
+        if len(parts) <= ticker_index or len(parts) > ticker_index + 2:
+            return format_hint
+        ticker = parts[ticker_index].strip().upper().replace(".JK", "")
+        if not legacy.TICKER_RE.fullmatch(ticker):
+            return format_hint
+        limit = 5
+        if len(parts) == ticker_index + 2:
+            if not parts[-1].isdigit() or not 1 <= int(parts[-1]) <= 10:
+                return format_hint
+            limit = int(parts[-1])
+        if refresh and not legacy.authorized(chat_id):
+            return "⛔ INSIDER REFRESH hanya tersedia untuk chat pribadi pemilik bot."
+        return format_insider_report(ticker, refresh=refresh, limit=limit)
+
     is_bandar_momentum = (
         (first == "bandar" and len(parts) >= 2 and parts[1].upper() == "MOMENTUM")
         or first in {"/bandar_momentum", "bandar_momentum"}
