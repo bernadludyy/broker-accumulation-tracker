@@ -1,6 +1,10 @@
 name: BOT1 Insider Disclosure Collector
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/insider_collector.yml"
   schedule:
     # 11:30, 16:30, 20:30 WIB on weekdays. Disclosure-based, not live market data.
     - cron: "30 4,9,13 * * 1-5"
