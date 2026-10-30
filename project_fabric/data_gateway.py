@@ -30,7 +30,9 @@ _MARKET_POLICIES: dict[tuple[str, str], CachePolicy] = {
     ("idx", "stock-summary"): CachePolicy(300, 900),
     ("idx", "stock-history"): CachePolicy(21_600, 86_400),
     ("idx", "foreign-flow"): CachePolicy(300, 900),
+    ("idx", "announcements"): CachePolicy(300, 86_400),
     ("idx", "company-announcements"): CachePolicy(21_600, 86_400),
+    ("idx", "ownership-files"): CachePolicy(3_600, 86_400),
     ("idx", "top-movers"): CachePolicy(30, 120),
 }
 
