@@ -17,61 +17,54 @@ from ai_decision_engine.telegram import format_ai_command, parse_ai_command
 from project_fabric.insider_intelligence import format_insider_report
 
 
-_HELP = """
-🏆 BROKER YTD MATRIX (hanya cache SQLite, 0 extra ZAPI)
-BROKER STALKER
-BROKER STALKER 10D 6
-→ Saham yang net buy oleh banyak broker; default 5 sesi, maksimal 10 hasil.
-BANDAR MOMENTUM
-BANDAR MOMENTUM EOD 10
-→ Screener broker + Value + EMA20 + RS + RSI + return; default EOD dan 0 ZAPI.
+_SCREENER_HELP = """📊 SCREENER TEKNIKAL & FLOW
+BANDAR MOMENTUM | BANDAR MOMENTUM EOD 10
+→ Broker + Value + EMA20 + RS + RSI + return; EOD default dan 0 ZAPI.
 BANDAR MOMENTUM LIVE 10
-→ Harga/value sesi berjalan (1 snapshot ZAPI); broker tetap dari cache selesai.
-→ /bandar_momentum adalah alias. Limit opsional 1–15.
-BULL DIV
-BULL DIV 10
-BULL DIV BBRI
-→ Regular bullish divergence: harga lower low + RSI14 higher low dari pivot EOD Neon.
-→ /bulldiv adalah alias; screener cache-only, 0 ZAPI.
-RATIO TREND
-RATIO TREND 10
-RATIO TREND BBRI
-→ Semua rule quality-ratio + MA20>MA50>MA200, lalu RSI/MACD/volume/foreign/R:R.
-→ QUALITY TREND dan /ratiotrend adalah alias; EOD Neon, 0 ZAPI.
-MARKET COMBO 2 LIVE
-→ Top Value ∩ Top Frequency, lalu konfirmasi bid/offer saat bursa berjalan.
-MARKET COMBO 2 EOD
-→ Watchlist Value + Frequency dari cache EOD; tampilkan penutupan dan harga rata-rata.
-MARKET COMBO 1 LIVE
-→ High ATS satu hari + bid/offer live; market cap tidak difilter.
-MARKET COMBO 1 EOD
-→ Watchlist High ATS dari cache EOD; 0 ZAPI/orderbook.
-→ Opsional limit 1–10. Tanpa LIVE/EOD tetap memakai LIVE.
+→ Harga/value berjalan memakai 1 snapshot ZAPI; alias /bandar_momentum.
+
+BULL DIV | BULL DIV 10 | BULL DIV BBRI
+→ Bullish divergence harga vs RSI14 dari pivot EOD Neon; alias /bulldiv, 0 ZAPI.
+
+RATIO TREND | RATIO TREND 10 | RATIO TREND BBRI
+→ Quality-ratio + MA + RSI/MACD/volume/foreign/R:R; alias QUALITY TREND dan /ratiotrend.
+
+MARKET COMBO 1 LIVE | MARKET COMBO 1 EOD
+MARKET COMBO 2 LIVE | MARKET COMBO 2 EOD
+→ Format umum: MARKET COMBO [1|2] [LIVE|EOD] [1-10].
+→ COMBO 1: High ATS; COMBO 2: Top Value ∩ Top Frequency.
+→ LIVE konfirmasi bid/offer; EOD memakai cache tanpa orderbook."""
+
+_BROKER_HELP = """🏆 BROKER INTELLIGENCE & YTD MATRIX
+BROKER STALKER | BROKER STALKER 10D 6
+→ Saham yang net buy oleh banyak broker; default 5 sesi, maks. 10 hasil.
+
 BROKER PERSIST BBRI
-→ Persistensi broker 5/10/20 sesi cache, net buy terkini vs YTD, intensitas.
-INSIDER BBRI
-→ Baca disclosure Direksi/Komisaris/Pengendali resmi dari cache Neon; 0 ZAPI.
-INSIDER REFRESH BBRI
-→ Pemeriksaan khusus satu emiten; owner-only, maksimal 1 ZAPI lalu simpan ke Neon.
-→ Data disclosure tertunda; tidak disamakan dengan broker/order flow live.
+→ Persistensi broker 5/10/20 sesi, net buy terkini vs YTD, dan intensitas.
+
 BROKER TOP BBRI YTD
 → Top 3 broker Net Buy + Net Sell untuk satu saham.
-CC NI TOP YTD
-→ Top 3 saham Net Buy oleh broker NI.
-CC NI TOP SELL YTD
-→ Top 3 saham Net Sell oleh broker NI.
-→ Ranking seluruh ticker yang memiliki histori broker tersimpan, bukan seluruh IDX.
-→ Setiap peringkat: Weighted Avg Buy (net buy) / Avg Sell (net sell).
-→ Perhitungan avg = total value sisi ÷ (total lot sisi × 100), bukan avg posisi net.
-→ PARTIAL/UNVERIFIED berarti coverage YTD belum dapat dipastikan.
-"""
+CC NI TOP YTD | CC NI TOP SELL YTD
+→ Top 3 saham Net Buy/Net Sell oleh broker NI.
+→ Ranking memakai histori cache; PARTIAL/UNVERIFIED berarti coverage belum pasti.
+→ Avg = total value sisi ÷ (total lot sisi × 100), bukan average posisi net."""
+
+_DATA_HELP = """🗂 INSIDER DISCLOSURE
+INSIDER BBRI
+→ Disclosure Direksi/Komisaris/Pengendali resmi dari cache Neon; 0 ZAPI.
+INSIDER REFRESH BBRI
+→ Owner-only, maks. 1 ZAPI lalu simpan ke Neon.
+→ Data tertunda; tidak disamakan dengan broker/order flow live."""
+
+_ANALYSIS_HELP = """🧠 BOT1 AI DECISION (Neon EOD; repair histori maks. 1 ZAPI)
+AI STATUS | AI CHECK BBRI | AI RUN BBRI
+→ CHECK: 0 AI; RUN: maks. 3 API berbayar dan dinonaktifkan secara default."""
 
 _original_command_result = legacy.command_result
-legacy.HELP_TEXT += "\n" + _HELP + "\n" + (
-    "🧠 BOT1 AI DECISION (Neon EOD; repair histori maks 1 ZAPI)\n"
-    "AI STATUS | AI CHECK BBRI | AI RUN BBRI\n"
-    "→ CHECK: 0 AI; RUN: max 3 API calls berbayar, dinonaktifkan default.\n"
-)
+legacy.extend_help_section("ANALISIS", _ANALYSIS_HELP)
+legacy.extend_help_section("SCREENER", _SCREENER_HELP)
+legacy.extend_help_section("BROKER", _BROKER_HELP)
+legacy.extend_help_section("DATA", _DATA_HELP)
 
 
 def command_result(text: str, chat_id: str) -> str:
