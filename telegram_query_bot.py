@@ -38,6 +38,7 @@ from project_fabric.fundamental_intelligence import (
 )
 from project_fabric.bot1_rank import format_bot1_rank
 from project_fabric.eod_refresh import EODNotReady, eod_status, refresh_eod, format_eod_reply
+from project_fabric.eod_flow import format_eod_flow
 from foreign_entry import evaluate_foreign_entry
 from entry_engine import (
     add_indicators,
@@ -4375,6 +4376,12 @@ SETUP RANK 10
 /eod status
 → Cek kesiapan EOD Neon tanpa ZAPI.
 
+BUMI FLOW EOD
+/flow BUMI
+BOT1 FLOW BUMI
+→ Baca price structure, delta foreign 1D/5D, dan snapshot antrean penutupan dari Neon.
+→ Proxy EOD, bukan aggressor trade delta live.
+
 🧠 UNIVERSE SMART V2 (cache Neon, tanpa ZAPI tambahan)
 BOT1 SMART ADRO
 → Net broker 5D/20D + penilaian dan risiko Universe.
@@ -4863,6 +4870,25 @@ def command_result(text: str, chat_id: str) -> str:
         except Exception as exc:
             print(f"[EOD-REFRESH-ERROR] {type(exc).__name__}: {exc}", file=sys.stderr)
             return "❌ EOD refresh gagal. Periksa log GitHub Actions Bot 1; arsip lama tetap dipertahankan."
+
+    if first_lower in {"/flow", "flow"} and len(parts) < 2:
+        return "Format: /flow TICKER (contoh: /flow BUMI)"
+
+    flow_ticker = None
+    if first_lower in {"/flow", "flow"} and len(parts) >= 2:
+        flow_ticker = parts[1]
+    elif len(parts) >= 3 and parts[1].upper() == "FLOW" and parts[2].upper() == "EOD":
+        flow_ticker = parts[0]
+    elif first_lower == "bot1" and len(parts) >= 3 and parts[1].upper() == "FLOW":
+        flow_ticker = parts[2]
+    if flow_ticker is not None:
+        try:
+            return format_eod_flow(normalize_ticker(flow_ticker))
+        except ValueError as exc:
+            return f"⚠️ EOD FLOW tidak tersedia: {exc}"
+        except Exception as exc:
+            print(f"[EOD-FLOW-ERROR] {type(exc).__name__}: {exc}", file=sys.stderr)
+            return "❌ EOD FLOW gagal dibaca. Periksa koneksi Neon atau jalankan /eod status."
 
     if first_lower in {"/setuprank", "setuprank"}:
         limit = next((int(p) for p in parts[1:] if p.isdigit()), 10)
