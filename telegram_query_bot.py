@@ -4346,253 +4346,220 @@ def format_bot1_full(ticker: str) -> str:
         ))
 
 
-HELP_TEXT = """🤖 BROKER QUERY BOT — COMMAND LIST
+HELP_SECTION_ORDER = (
+    "ANALISIS",
+    "SCREENER",
+    "BROKER",
+    "FOREIGN",
+    "TEKNIKAL",
+    "DATA",
+)
 
-🛡 MARKET REGIME GATE
-MARKET REGIME
-/marketregime
+HELP_SECTION_TITLES = {
+    "ANALISIS": "🧠 ANALISIS & KEPUTUSAN",
+    "SCREENER": "🔎 SCREENER & RANKING",
+    "BROKER": "🏦 BROKER & SMART MONEY",
+    "FOREIGN": "🌍 FOREIGN FLOW",
+    "TEKNIKAL": "🎯 ENTRY & TEKNIKAL",
+    "DATA": "🛠 DATA, CACHE & WATCHLIST",
+}
+
+HELP_TOPIC_ALIASES = {
+    "ANALISA": "ANALISIS",
+    "ANALISIS": "ANALISIS",
+    "AI": "ANALISIS",
+    "RANK": "SCREENER",
+    "RANKING": "SCREENER",
+    "SCAN": "SCREENER",
+    "SCREENER": "SCREENER",
+    "BROKER": "BROKER",
+    "BANDAR": "SCREENER",
+    "SMARTMONEY": "BROKER",
+    "FLOW": "FOREIGN",
+    "FOREIGN": "FOREIGN",
+    "ENTRY": "TEKNIKAL",
+    "TEKNIKAL": "TEKNIKAL",
+    "TECHNICAL": "TEKNIKAL",
+    "CACHE": "DATA",
+    "DATABASE": "DATA",
+    "DATA": "DATA",
+    "WATCHLIST": "DATA",
+}
+
+HELP_SECTIONS = {
+    "ANALISIS": """🛡 MARKET REGIME GATE
+MARKET REGIME | /marketregime
 → Regime dari breadth, foreign flow, dan open→close shared snapshot.
 
 📊 FUNDAMENTAL SEKTOR (Neon, 0 extra ZAPI)
-/fund ADRO
-ADRO FUND
-BOT1 FUND ADRO
-→ Score valuasi, kualitas, growth, safety dan konsistensi versus benchmark sektor.
+/fund ADRO | ADRO FUND | BOT1 FUND ADRO
+→ Score valuasi, kualitas, growth, safety dan konsistensi versus sektor.
 
 🧭 GABUNGAN SEMUA PERHITUNGAN BOT1
-/full ADRO
-ADRO FULL
-BOT1 FULL ADRO
-→ Fundamental + broker/Universe + seluruh hard gate FOREIGN ENTRY dan teknikal swing.
+/full ADRO | ADRO FULL | BOT1 FULL ADRO
+→ Fundamental + broker/Universe + hard gate FOREIGN ENTRY dan teknikal swing.
 
-🏆 RANKING SETUP EOD (Neon, 0 extra ZAPI)
-SETUP RANK
-SETUP RANK 10
-→ Pre-screen Fundamental + Teknikal + Smart Money Proxy. Broker dikonfirmasi terpisah lewat /refresh.
+📊 EOD FLOW ANALYSIS (Neon, 0 extra ZAPI)
+BUMI FLOW EOD | /flow BUMI | BOT1 FLOW BUMI
+→ Price structure, delta foreign 1D/5D, dan snapshot antrean penutupan.
+→ Proxy EOD, bukan aggressor trade delta live.""",
 
-/eod refresh
-→ Ambil dan arsipkan EOD hari ini setelah 17.00 WIB (maksimum 1 request ZAPI jika belum lengkap).
+    "SCREENER": """🏆 RANKING SETUP EOD (Neon, 0 extra ZAPI)
+SETUP RANK | SETUP RANK 10
+→ Pre-screen Fundamental + Teknikal + Smart Money Proxy.
 
-/eod status
-→ Cek kesiapan EOD Neon tanpa ZAPI.
-
-BUMI FLOW EOD
-/flow BUMI
-BOT1 FLOW BUMI
-→ Baca price structure, delta foreign 1D/5D, dan snapshot antrean penutupan dari Neon.
-→ Proxy EOD, bukan aggressor trade delta live.
-
-🧠 UNIVERSE SMART V2 (cache Neon, tanpa ZAPI tambahan)
+🧠 UNIVERSE SMART V2 (cache Neon, 0 extra ZAPI)
 BOT1 SMART ADRO
 → Net broker 5D/20D + penilaian dan risiko Universe.
-BOT2 SMART
-BOT2 SMART 10
-→ Ranking kualitas dari saham yang SUDAH lolos prefilter BOT2 MARKET.
-UNIVERSE ADRO
-/intel ADRO
-→ Detail lima indikator untuk satu ticker (gunakan /intel ADRO).
-→ Data historis/tidak tersedia diberi label N/A, bukan skor nol.
+BOT2 SMART | BOT2 SMART 10
+→ Ranking saham yang sudah lolos prefilter BOT2 MARKET.
+UNIVERSE ADRO | /intel ADRO
+→ Detail lima indikator; data tidak tersedia diberi label N/A.
 
-🌍 FOREIGN + ENTRY
-FOREIGN ENTRY BOT2
-ADRO FOREIGN ENTRY BOT2
-FOREIGN ENTRY BOT2 REFRESH
-→ Gabungkan Top50 frequency, Top30 foreign dan koreksi open→close -0,3% s.d. -5% dengan seluruh filter FOREIGN ENTRY.
-→ Snapshot harian disimpan di database; REFRESH memaksa ambil ulang dari Zapi.
-
-🗄 CACHE-ONLY PRIORITY COMMANDS (0 extra ZAPI)
-CACHE STATUS
-→ Status snapshot harian, shared stock-summary, Universe Intelligence, dan dynamic-liquidity event.
-
+🗄 CACHE-ONLY PRIORITY (0 extra ZAPI)
 TOP VALUE 20
-→ Top nilai transaksi rupiah dari stock-summary cache.
-
+→ Ranking nilai transaksi rupiah.
 TURNOVER 20
-→ Ranking Value ÷ Market Cap; cari saham paling aktif relatif terhadap ukurannya.
-
+→ Ranking Value ÷ Market Cap.
 FOREIGN DIP 20
-→ Net Foreign Buy positif + koreksi open→close -0,3% s.d. -5%.
-
+→ Net Foreign Buy positif + koreksi -0,3% s.d. -5%.
 BREAKOUT READY 20
-→ Ranking Breakout Readiness dari Universe Intelligence cache.
-
-DYNAMIC LIQUIDITY
-DYNAMIC LIQUIDITY 20
-→ Saham yang tercatat memenuhi tier liquidity dinamis Bot 4; observasi saja.
+→ Ranking Breakout Readiness.
+DYNAMIC LIQUIDITY | DYNAMIC LIQUIDITY 20
+→ Saham yang memenuhi tier liquidity dinamis Bot 4.
 
 📈 BOT2 MARKET DATA
-TOP FREQ
-TOP FREQ 20
-→ Ranking Frequency dari shared stock-summary.
-
-NET FOREIGN
-TOP FOREIGN 20
-→ Ranking Net Foreign Buy VALUE dari shared stock-summary.
-
-KOREKSI
-KOREKSI 20
-HARGA KOREKSI 20
-→ Saham dengan koreksi open→close/current -0,3% s.d. -5%.
-
-BOT2 MARKET
-BOT2 MARKET 20
-→ Irisan Top50 Frequency + Top30 Net Foreign Buy + zona koreksi.
-
+TOP FREQ | TOP FREQ 20
+NET FOREIGN | TOP FOREIGN 20
+KOREKSI | KOREKSI 20 | HARGA KOREKSI 20
+BOT2 MARKET | BOT2 MARKET 20
 ADRO BOT2 DATA
-→ Detail Frequency rank, Net Foreign rank, koreksi, close, dan status prefilter satu ticker.
+→ Ranking Frequency, Net Foreign, koreksi, irisan prefilter, atau detail ticker.
+
+🌍 FOREIGN + ENTRY BOT2
+FOREIGN ENTRY BOT2 | ADRO FOREIGN ENTRY BOT2
+FOREIGN ENTRY BOT2 REFRESH
+→ Gabungkan Top50 frequency, Top30 foreign, zona koreksi, dan filter entry.
+→ REFRESH memaksa pembaruan snapshot ZAPI.""",
+
+    "BROKER": """📊 BROKER SUMMARY
+ADRO
+→ Full summary 5D/10D/20D/YTD.
+ADRO TODAY | ADRO DAILY
+→ Summary satu hari perdagangan terakhir.
+ADRO 5D | ADRO 10D | ADRO 20D | ADRO YTD
+→ Detail satu periode.
+ADRO VALUE
+→ Buy/Sell/Net Value 5D/10D/20D/YTD.
+ADRO BROKER [5D|10D|20D|YTD]
+→ Dominant broker berdasarkan Value + Lot; default 20D.
+ADRO CC NI [5D|10D|20D|YTD]
+→ Detail broker tertentu; default 20D.
+
+🏦 BROKER MARKET SCAN
+CC NI ACCUM [5D|10D|20D|YTD]
+CC NI DISTRIB [5D|10D|20D|YTD]
+→ Scan akumulasi/distribusi broker; default 5D.
+
+🧠 SMART MONEY / MARKET MAKER FLOW
+SMARTMONEY [5D|10D|20D|YTD]
+MMFLOW 5D | MM FLOW 5D
+→ Scan smart-money broker flow pada watchlist; default 5D.
+ADRO SMARTMONEY [5D|10D|20D|YTD]
+ADRO MMFLOW 5D
+→ Detail smart-money satu ticker.""",
+
+    "FOREIGN": """🌍 MARKET FOREIGN FLOW
+FOREIGN NETBUY
+→ Top foreign net buy IDX hari bursa terbaru.
+FOREIGN NETBUY 5D
+→ Top foreign net buy akumulasi lima hari bursa.
+
+📊 FOREIGN FLOW PER TICKER
+ADRO FOREIGN [1D|5D|10D|20D]
+FOREIGN ADRO [1D|5D|10D|20D]
+→ Foreign buy/sell/net value; default 1D.
+
+🎯 FOREIGN ENTRY
 ADRO FOREIGN ENTRY
 ADRO FOREIGN ENTRY DAYTRADE
 FOREIGN ENTRY
-→ Satu saham / scan watchlist, default SWING.
-→ Foreign net 5D positif, ≥3/5 hari net buy, hari terakhir net buy.
-→ Score ≥70 (default), entry PASS, R:R ≥1,50, data lengkap.
-→ Data harian; bukan eksekusi order otomatis.
+→ Analisis satu saham atau scan watchlist; default SWING.
+→ Syarat: foreign net 5D positif, minimal 3/5 hari net buy, hari terakhir net buy,
+  score minimal 70, entry PASS, R:R minimal 1,50, dan data lengkap.
+→ Analisis harian; bukan eksekusi order otomatis.""",
 
-📊 BROKER SUMMARY
-ADRO
-→ Full summary 5D/10D/20D/YTD
-
-ADRO TODAY
-ADRO DAILY
-→ Broker summary 1 hari perdagangan terakhir
-
-ADRO 5D
-ADRO 10D
-ADRO 20D
-ADRO YTD
-→ Detail satu periode
-
-ADRO VALUE
-→ Buy/Sell/Net Value 5D/10D/20D/YTD
-
-ADRO BROKER
-ADRO BROKER 5D
-ADRO BROKER 10D
-ADRO BROKER 20D
-ADRO BROKER YTD
-→ Dominant broker berdasarkan Value + Lot
-→ Default: 20D
-
-ADRO CC NI
-ADRO CC NI 5D
-ADRO CC NI 10D
-ADRO CC NI 20D
-ADRO CC NI YTD
-→ Detail broker tertentu
-→ Default: 20D
-
-🏦 BROKER MARKET SCAN
-CC NI ACCUM
-CC NI ACCUM 5D
-CC NI ACCUM 10D
-CC NI ACCUM 20D
-CC NI ACCUM YTD
-→ Scan saham yang sedang diakumulasi broker NI
-→ Default: 5D
-
-CC NI DISTRIB
-CC NI DISTRIB 5D
-CC NI DISTRIB 10D
-CC NI DISTRIB 20D
-CC NI DISTRIB YTD
-→ Scan saham yang sedang didistribusi broker NI
-→ Default: 5D
-
-🌍 FOREIGN FLOW
-FOREIGN NETBUY
-→ Top foreign net buy value IDX hari bursa terbaru
-
-FOREIGN NETBUY 5D
-→ Top foreign net buy value akumulasi 5 hari bursa
-
-ADRO FOREIGN
-ADRO FOREIGN 1D
-ADRO FOREIGN 5D
-ADRO FOREIGN 10D
-ADRO FOREIGN 20D
-→ Foreign buy/sell/net value satu ticker
-→ Default: 1D
-
-FOREIGN ADRO
-FOREIGN ADRO 1D
-FOREIGN ADRO 5D
-FOREIGN ADRO 10D
-FOREIGN ADRO 20D
-→ Format alternatif foreign flow satu ticker
-
-🧠 SMART MONEY / MARKET MAKER FLOW
-SMARTMONEY
-SMARTMONEY 5D
-SMARTMONEY 10D
-SMARTMONEY 20D
-SMARTMONEY YTD
-→ Scan smart-money broker flow pada watchlist
-→ Default: 5D
-
-MMFLOW 5D
-MM FLOW 5D
-→ Alias SMARTMONEY
-
-ADRO SMARTMONEY
-ADRO SMARTMONEY 5D
-ADRO SMARTMONEY 10D
-ADRO SMARTMONEY 20D
-ADRO SMARTMONEY YTD
-→ Detail smart-money flow satu ticker
-→ Default: 5D
-
-ADRO MMFLOW 5D
-→ Alias detail smart-money satu ticker
-
-🎯 ENTRY SCANNER
+    "TEKNIKAL": """🎯 ENTRY SCANNER
 ADRO ENTRY
-→ Entry Scanner BEI, default SWING
-
+→ Entry Scanner BEI, default SWING.
 ADRO ENTRY SWING
-→ Entry plan swing + broker flow + scoring
-
+→ Entry plan swing + broker flow + scoring.
 ADRO ENTRY DAYTRADE
-→ Entry plan mode daytrade
+→ Entry plan mode daytrade.
 
 🌀 FIBONACCI GOLDEN RATIO
-ADRO FIBO
-ADRO FIBONACCI
-→ Golden Pocket 0.618–0.650 dari swing 50 hari
+ADRO FIBO | ADRO FIBONACCI | FIBO ADRO
+→ Golden Pocket 0.618–0.650 dari swing 50 hari.
+ADRO FIBO 20D | ADRO FIBO 50D | ADRO FIBO 100D
+→ Ubah lookback Fibonacci.""",
 
-ADRO FIBO 20D
-ADRO FIBO 50D
-ADRO FIBO 100D
-→ Ubah lookback Fibonacci
+    "DATA": """📥 EOD NEON
+/eod refresh
+→ Ambil dan arsipkan EOD setelah 17.00 WIB; maks. 1 request ZAPI jika belum lengkap.
+/eod status
+→ Cek kesiapan EOD Neon tanpa ZAPI.
 
-FIBO ADRO
-→ Format alternatif
+🗄 STATUS CACHE
+CACHE STATUS
+→ Status snapshot harian, stock-summary, Universe, dan dynamic-liquidity event.
 
 🛠 WATCHLIST & DATABASE
 /add BBRI
-→ Tambah watchlist + smart YTD backfill
-
+→ Tambah watchlist + smart YTD backfill.
 /remove BBRI
-→ Hapus dari watchlist; histori SQLite tetap disimpan
-
+→ Hapus dari watchlist; histori SQLite tetap disimpan.
 /list
-→ Lihat watchlist aktif
-
+→ Lihat watchlist aktif.
 /status BBRI
-→ Audit histori SQLite
-
-/refresh BBRI
-→ Update data terbaru + repair gap satu ticker
-
-/refresh ALL
-→ Update seluruh ticker di watchlist + repair gap
-
+→ Audit histori SQLite.
+/refresh BBRI | /refresh ALL
+→ Update data terbaru + repair gap satu ticker atau seluruh watchlist.
 /ticker BBRI
-→ Full broker summary ticker
+→ Full broker summary ticker.""",
+}
 
-/help
-/start
-→ Tampilkan command list
-"""
+
+def render_help(topic: str | None = None) -> str:
+    """Render all commands or one functional help section."""
+    normalized = HELP_TOPIC_ALIASES.get(str(topic or "").strip().upper())
+    menu = (
+        "🤖 BOT 1 — COMMAND HELP\n"
+        "Dikelompokkan berdasarkan fungsi.\n"
+        "Pilih detail: HELP ANALISIS | HELP SCREENER | HELP BROKER | "
+        "HELP FOREIGN | HELP TEKNIKAL | HELP DATA"
+    )
+    if topic and not normalized:
+        return menu + "\n\n❌ Kategori tidak dikenal: " + str(topic).strip().upper()
+    if normalized:
+        return menu + "\n\n" + HELP_SECTION_TITLES[normalized] + "\n" + HELP_SECTIONS[normalized].strip()
+    sections = [
+        HELP_SECTION_TITLES[key] + "\n" + HELP_SECTIONS[key].strip()
+        for key in HELP_SECTION_ORDER
+    ]
+    return menu + "\n\n" + "\n\n".join(sections) + "\n\n/help | /start\n→ Tampilkan seluruh command."
+
+
+def extend_help_section(section: str, text: str) -> None:
+    """Register commands supplied by a Bot 1 dispatcher extension."""
+    key = str(section).strip().upper()
+    if key not in HELP_SECTIONS:
+        raise KeyError(f"Unknown help section: {section}")
+    HELP_SECTIONS[key] = HELP_SECTIONS[key].rstrip() + "\n\n" + text.strip()
+    global HELP_TEXT
+    HELP_TEXT = render_help()
+
+
+HELP_TEXT = render_help()
 
 
 # ============================================================
@@ -4817,7 +4784,13 @@ def command_result(text: str, chat_id: str) -> str:
     first = parts[0].split("@")[0]
     first_lower = first.lower()
 
-    if first_lower in {"/start", "/help", "help"}:
+    if first_lower in {"/help", "help"}:
+        topic = parts[1] if len(parts) == 2 else None
+        if len(parts) > 2:
+            return render_help(" ".join(parts[1:]))
+        return render_help(topic)
+
+    if first_lower == "/start":
         return HELP_TEXT
 
     if first_lower in {"/marketregime", "marketregime"} or (
