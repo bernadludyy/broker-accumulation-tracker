@@ -294,14 +294,14 @@ def analyze_silent_accumulation(
             continue
         if not brokers:
             reasons.append("belum ada broker net buy ≥3 dari 5 sesi")
-        if not 0 <= snapshot["distance_low_pct"] <= MAX_LOW_DISTANCE_PCT:
+        if snapshot["distance_low_pct"] > MAX_LOW_DISTANCE_PCT:
             reasons.append(f"harga lebih dari {MAX_LOW_DISTANCE_PCT:.0f}% dari low 60 sesi")
+        elif snapshot["distance_low_pct"] < 0:
+            reasons.append("penutupan berada di bawah low 60 sesi")
         if snapshot["quiet_ratio"] > MAX_QUIET_RATIO:
             reasons.append("value 5 sesi belum lebih sepi dari baseline")
         if snapshot["median_value_5d"] < MIN_MEDIAN_VALUE_IDR:
             reasons.append("median value 5 sesi terlalu kecil")
-        if snapshot["close"] < snapshot["support"] * 0.98:
-            reasons.append("penutupan sudah menembus area invalidasi")
 
         broker = brokers[0] if brokers else None
         eligible = not reasons and broker is not None
