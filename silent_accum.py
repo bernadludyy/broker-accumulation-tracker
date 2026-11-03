@@ -354,8 +354,9 @@ def _format_candidate(row: dict[str, Any], index: int | None = None) -> list[str
     prefix = f"{index}. " if index is not None else ""
     snapshot = row["snapshot"]
     broker = row.get("broker")
+    score = f"{row['score']:.1f}/100" if row.get("score") is not None else "N/A"
     lines = [
-        f"{prefix}{row['ticker']} | Skor {row['score']:.1f}/100 | {row['status']}",
+        f"{prefix}{row['ticker']} | Skor {score} | {row['status']}",
         f"Harga {_price(snapshot['close'])} | Support {_price(snapshot['support'])} "
         f"| Jarak low {snapshot['distance_low_pct']:+.2f}%",
         f"Value 5D {_rupiah(snapshot['median_value_5d'])} | "
@@ -412,7 +413,9 @@ def format_silent_accum(
         f"🤫 SILENT ACCUM — EOD {market_day}",
         f"Sumber pasar: {source}",
         f"Broker cache sampai: {broker_day}",
-        "Filter: dekat low 60D | value 5D ≤75% baseline | median ≥Rp500 juta | broker NB ≥3/5 sesi",
+        f"Filter: dekat low 60D | value 5D ≤{MAX_QUIET_RATIO * 100:.0f}% baseline "
+        f"| median ≥{_rupiah(MIN_MEDIAN_VALUE_IDR)} | "
+        f"broker NB ≥{MIN_BROKER_BUY_DAYS}/{LOOKBACK_SESSIONS} sesi",
     ]
     target = _expected_eod_date(now)
     if market_day < target:
