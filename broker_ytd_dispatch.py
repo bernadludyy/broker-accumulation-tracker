@@ -13,11 +13,15 @@ from bandar_momentum import format_bandar_momentum
 from bull_divergence import format_bull_divergence
 from market_combos import format_market_combo
 from quality_trend import format_quality_trend
+from silent_accum import format_silent_accum
 from ai_decision_engine.telegram import format_ai_command, parse_ai_command
 from project_fabric.insider_intelligence import format_insider_report
 
 
 _SCREENER_HELP = """📊 SCREENER TEKNIKAL & FLOW
+SILENT ACCUM | SILENT ACCUM 10 | SILENT ACCUM BBRI
+→ Area low 60D + value sepi + broker yang sama net buy ≥3/5 sesi; alias /silent_accum, 0 ZAPI.
+
 BANDAR MOMENTUM | BANDAR MOMENTUM EOD 10
 → Broker + Value + EMA20 + RS + RSI + return; EOD default dan 0 ZAPI.
 BANDAR MOMENTUM LIVE 10
@@ -80,6 +84,31 @@ def command_result(text: str, chat_id: str) -> str:
         return format_ai_command(ai_request, broker_db=str(legacy.DB_PATH))
 
     first = parts[0].split("@")[0].lower()
+
+    is_silent_accum = (
+        (first == "silent" and len(parts) >= 2 and parts[1].upper() == "ACCUM")
+        or first in {"/silent_accum", "silent_accum"}
+    )
+    if is_silent_accum:
+        options = parts[2:] if first == "silent" else parts[1:]
+        if len(options) > 1:
+            return "Format: SILENT ACCUM [1-15|TICKER]"
+        if not options:
+            return format_silent_accum(
+                str(legacy.DB_PATH), legacy.safe_end_date(), limit=10
+            )
+        option = options[0].strip().upper().replace(".JK", "")
+        if option.isdigit():
+            if 1 <= int(option) <= 15:
+                return format_silent_accum(
+                    str(legacy.DB_PATH), legacy.safe_end_date(), limit=int(option)
+                )
+            return "Format: SILENT ACCUM [1-15|TICKER]"
+        if legacy.TICKER_RE.fullmatch(option):
+            return format_silent_accum(
+                str(legacy.DB_PATH), legacy.safe_end_date(), ticker=option, limit=1
+            )
+        return "Format: SILENT ACCUM [1-15|TICKER]"
 
     if first in {"insider", "/insider"}:
         format_hint = "Format: INSIDER BBRI [1-10] atau INSIDER REFRESH BBRI [1-10]"
