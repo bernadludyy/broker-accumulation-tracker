@@ -104,6 +104,18 @@ class SilentAccumTests(unittest.TestCase):
         self.assertIn("Skor N/A", text)
         self.assertIn("BELUM LOLOS", text)
 
+    def test_close_below_support_has_clear_reason(self):
+        result = feature.analyze_silent_accumulation(
+            [market_row(close=99)],
+            {"AAAA": history()},
+            {"AAAA": [broker()]},
+            market_day=self.market_day,
+            ticker="AAAA",
+        )
+        reasons = " ".join(result["diagnostics"][0]["reasons"])
+        self.assertIn("di bawah low 60 sesi", reasons)
+        self.assertNotIn("lebih dari 10%", reasons)
+
     def test_formatter_uses_eod_cache_and_zero_zapi(self):
         now = datetime(2026, 9, 7, 18, 0, tzinfo=ZoneInfo("Asia/Jakarta"))
         with patch.object(
