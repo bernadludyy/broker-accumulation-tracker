@@ -39,6 +39,7 @@ from project_fabric.fundamental_intelligence import (
 from project_fabric.bot1_rank import format_bot1_rank
 from project_fabric.eod_refresh import EODNotReady, eod_status, refresh_eod, format_eod_reply
 from project_fabric.eod_flow import format_eod_flow
+from session_screener import format_session_screener
 from foreign_entry import evaluate_foreign_entry
 from entry_engine import (
     add_indicators,
@@ -4408,6 +4409,11 @@ BUMI FLOW EOD | /flow BUMI | BOT1 FLOW BUMI
 SETUP RANK | SETUP RANK 10
 → Pre-screen Fundamental + Teknikal + Smart Money Proxy.
 
+🕘 SCREENER SESI BSJP/BPJS
+BSJP LIVE | BSJP EOD | BPJS LIVE | BPJS EOD
+→ Tambahkan jumlah 1-20, contoh: BSJP LIVE 10.
+→ LIVE memakai snapshot pasar; EOD adalah pantauan sesi berikutnya.
+
 🧠 UNIVERSE SMART V2 (cache Neon, 0 extra ZAPI)
 BOT1 SMART ADRO
 → Net broker 5D/20D + penilaian dan risiko Universe.
@@ -4792,6 +4798,17 @@ def command_result(text: str, chat_id: str) -> str:
 
     if first_lower == "/start":
         return HELP_TEXT
+
+    if first_lower.lstrip("/").upper() in {"BSJP", "BPJS"}:
+        if len(parts) > 3 or (len(parts) >= 2 and parts[1].upper() not in {"LIVE", "EOD"}) or (len(parts) == 3 and (not parts[2].isdigit() or not 1 <= int(parts[2]) <= 20)):
+            return "Format: BSJP|BPJS LIVE|EOD [1-20]"
+        kind = first_lower.lstrip("/").upper()
+        mode = parts[1].upper() if len(parts) >= 2 else "LIVE"
+        try:
+            return format_session_screener(kind, mode, int(parts[2]) if len(parts) == 3 else 10)
+        except Exception as exc:
+            print(f"[SESSION-SCREENER-ERROR] {type(exc).__name__}: {exc}", file=sys.stderr)
+            return f"❌ {kind} {mode}: data cache/Neon belum dapat dibaca. Cek /eod status untuk mode EOD."
 
     if first_lower in {"/marketregime", "marketregime"} or (
         first_lower == "market" and len(parts) >= 2 and parts[1].upper() == "REGIME"
