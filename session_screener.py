@@ -95,6 +95,9 @@ def format_session_screener(kind: str, mode: str, limit: int = 10,
             return f"{kind} LIVE: snapshot tanggal {day}, bukan sesi hari ini."
     else:
         rows, day, source = load_cached_market(now=now, completed_only=True)
+        if source != "NEON DAILY EOD SNAPSHOT":
+            return (f"{kind} EOD: arsip final Neon belum tersedia (sumber: {source}). "
+                    "Jalankan /eod status; snapshot intraday tidak dipakai sebagai EOD.")
         if day > _expected_eod_date(now):
             return f"{kind} EOD: snapshot {day} belum final."
     if len(rows) < 100:

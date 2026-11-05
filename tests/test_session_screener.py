@@ -29,7 +29,7 @@ class SessionScreenerTests(unittest.TestCase):
     def test_eod_uses_completed_cache_and_prior_baseline_only(self):
         now = datetime(2026, 11, 5, 18, tzinfo=WIB)
         rows = [row(code=f"A{i:03d}") for i in range(100)]
-        with patch.object(screen, "load_cached_market", return_value=(rows, "2026-11-05", "TEST EOD")) as cache, \
+        with patch.object(screen, "load_cached_market", return_value=(rows, "2026-11-05", "NEON DAILY EOD SNAPSHOT")) as cache, \
              patch.object(screen, "load_baselines", return_value={"A000": (8_000_000_000, 10)}) as baseline, \
              patch.object(screen, "load_shared_live_market", side_effect=AssertionError("live")):
             result = screen.format_session_screener("BSJP", "EOD", now=now)
@@ -37,6 +37,13 @@ class SessionScreenerTests(unittest.TestCase):
         baseline.assert_called_once_with("2026-11-05")
         self.assertIn("A000", result)
         self.assertIn("pantauan sesi berikutnya", result)
+
+    def test_eod_rejects_unfinalized_local_snapshot(self):
+        now = datetime(2026, 11, 5, 18, tzinfo=WIB)
+        with patch.object(screen, "load_cached_market", return_value=([row()], "2026-11-05", "LATEST DAILY DATABASE SNAPSHOT")), \
+             patch.object(screen, "load_baselines", side_effect=AssertionError("unfinalized")):
+            result = screen.format_session_screener("BSJP", "EOD", now=now)
+        self.assertIn("arsip final Neon belum tersedia", result)
 
     def test_bpjs_live_identifies_proxy_not_30_minute_data(self):
         now = datetime(2026, 11, 5, 10, tzinfo=WIB)
