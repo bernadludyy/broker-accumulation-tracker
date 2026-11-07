@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, Mock, patch
 from zoneinfo import ZoneInfo
 
 from project_fabric.eod_refresh import (
-    EODNotReady, _latest_session_date, _validate, eod_status,
+    EODNotReady, _latest_session_date, _source_session_date, _validate, eod_status,
     format_eod_reply, refresh_eod,
 )
 
@@ -61,11 +61,21 @@ class EODRefreshTests(unittest.TestCase):
         self.assertIn("stock_history_daily", sql)
         self.assertEqual(params, (date(2026, 11, 7), date(2026, 11, 7)))
 
+    def test_source_session_date_requires_one_complete_date(self):
+        self.assertEqual(_source_session_date(sample("2026-11-06")),
+                         date(2026, 11, 6))
+        mixed = sample("2026-11-06")
+        mixed["data"]["data"][0]["Date"] = "2026-11-05T00:00:00"
+        with self.assertRaises(EODNotReady):
+            _source_session_date(mixed)
+
     @patch("project_fabric.eod_refresh._latest_session_date",
-           return_value=date(2026, 11, 6))
+           return_value=date(2026, 11, 5))
     @patch("project_fabric.eod_refresh._counts", return_value=(963, 963))
-    def test_last_mode_selects_friday_on_saturday_without_zapi(self, _counts, _latest):
+    @patch.dict("os.environ", {"ZPI_API_KEY": "offline-test-key"})
+    def test_last_mode_selects_source_newer_than_neon(self, _counts, _latest):
         saturday = datetime(2026, 11, 7, 10, 0, tzinfo=WIB)
+        self.gateway.get_json.return_value = sample("2026-11-06")
         result = refresh_eod(
             asof=saturday, archive=self.archive, gateway=self.gateway, latest=True,
         )
@@ -73,14 +83,18 @@ class EODRefreshTests(unittest.TestCase):
         self.assertEqual(result["status"], "CURRENT")
         self.assertEqual(result["date"], "2026-11-06")
         self.assertEqual(result["selection"], "LAST_SESSION")
-        self.assertEqual(result["zapi_calls"], 0)
-        self.gateway.get_json.assert_not_called()
+        self.assertEqual(result["zapi_calls"], 1)
+        request = self.gateway.get_json.call_args.kwargs
+        self.assertEqual(request["params"], {"length": 5000, "start": 0})
+        self.assertTrue(request["validate"](sample("2026-11-06")))
+        self.archive.save_summary.assert_not_called()
+        self.assertEqual(self.gateway.cache.set.call_count, 2)
 
     @patch("project_fabric.eod_refresh._latest_session_date",
-           return_value=date(2026, 11, 6))
+           return_value=date(2026, 11, 5))
     @patch("project_fabric.eod_refresh._counts", side_effect=[(0, 963), (963, 963)])
     @patch.dict("os.environ", {"ZPI_API_KEY": "offline-test-key"})
-    def test_last_mode_repairs_missing_summary_with_one_exact_date_fetch(
+    def test_last_mode_repairs_missing_summary_with_one_latest_source_fetch(
         self, _counts, _latest,
     ):
         saturday = datetime(2026, 11, 7, 10, 0, tzinfo=WIB)
@@ -92,14 +106,35 @@ class EODRefreshTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "UPDATED")
         self.assertEqual(result["date"], "2026-11-06")
-        self.assertEqual(self.gateway.get_json.call_args.kwargs["params"]["date"],
-                         "2026-11-06")
-        self.assertEqual(self.gateway.cache.set.call_count, 1)
+        self.assertEqual(self.gateway.get_json.call_args.kwargs["params"],
+                         {"length": 5000, "start": 0})
+        self.assertEqual(result["zapi_calls"], 1)
+        self.assertEqual(self.gateway.cache.set.call_count, 2)
         self.assertEqual(self.archive.save_summary.call_args.kwargs["completed_through"],
                          "2026-11-06")
 
+    @patch("project_fabric.eod_refresh._latest_session_date",
+           return_value=date(2026, 11, 6))
+    @patch("project_fabric.eod_refresh._counts", return_value=(963, 963))
+    @patch.dict("os.environ", {"ZPI_API_KEY": "offline-test-key"})
+    def test_last_mode_keeps_previous_session_during_live_market(self, _counts, _latest):
+        self.gateway.get_json.return_value = sample("2026-11-09")
+        result = refresh_eod(
+            asof=datetime(2026, 11, 9, 10, 0, tzinfo=WIB),
+            archive=self.archive,
+            gateway=self.gateway,
+            latest=True,
+        )
+        self.assertEqual(result["status"], "CURRENT")
+        self.assertEqual(result["date"], "2026-11-06")
+        self.archive.save_summary.assert_not_called()
+
     @patch("project_fabric.eod_refresh._latest_session_date", return_value=None)
-    def test_last_mode_fails_closed_when_neon_has_no_observed_session(self, _latest):
+    @patch.dict("os.environ", {"ZPI_API_KEY": "offline-test-key"})
+    def test_last_mode_fails_closed_when_latest_source_is_invalid(self, _latest):
+        def invalid_source(**kwargs):
+            return kwargs["validate"](sample("2026-11-06", n=250))
+        self.gateway.get_json.side_effect = invalid_source
         with self.assertRaises(EODNotReady):
             refresh_eod(
                 asof=datetime(2026, 11, 7, 10, 0, tzinfo=WIB),
@@ -107,7 +142,7 @@ class EODRefreshTests(unittest.TestCase):
                 gateway=self.gateway,
                 latest=True,
             )
-        self.gateway.get_json.assert_not_called()
+        self.archive.save_summary.assert_not_called()
 
     @patch("project_fabric.eod_refresh._counts", side_effect=[(0, 963), (963, 963)])
     @patch.dict("os.environ", {"ZPI_API_KEY": "offline-test-key"})
@@ -166,7 +201,7 @@ class EODRefreshTests(unittest.TestCase):
                                 "rows": 963, "zapi_calls": 0,
                                 "selection": "LAST_SESSION"})
         self.assertIn("LAST SESSION", msg)
-        self.assertIn("arsip Neon", msg)
+        self.assertIn("ZAPI/Neon", msg)
 
 
 class TelegramEODRoutingTests(unittest.TestCase):
