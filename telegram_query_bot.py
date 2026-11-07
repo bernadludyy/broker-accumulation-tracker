@@ -4512,6 +4512,8 @@ ADRO FIBO 20D | ADRO FIBO 50D | ADRO FIBO 100D
     "DATA": """📥 EOD NEON
 /eod refresh
 → Ambil dan arsipkan EOD setelah 17.00 WIB; maks. 1 request ZAPI jika belum lengkap.
+/eod refresh last
+→ Pilih sesi IHSG terbaru dari arsip Neon; aman untuk akhir pekan/libur bursa.
 /eod status
 → Cek kesiapan EOD Neon tanpa ZAPI.
 
@@ -4850,10 +4852,16 @@ def command_result(text: str, chat_id: str) -> str:
     if first_lower in {"/eod", "eod"}:
         if not authorized(chat_id):
             return "⛔ Command EOD hanya tersedia untuk chat pribadi pemilik bot."
-        if len(parts) != 2 or parts[1].lower() not in {"refresh", "status"}:
-            return "Format: /eod refresh atau /eod status"
+        command = [part.lower() for part in parts[1:]]
+        if command not in (["refresh"], ["refresh", "last"], ["status"]):
+            return "Format: /eod refresh, /eod refresh last, atau /eod status"
         try:
-            result = refresh_eod() if parts[1].lower() == "refresh" else eod_status()
+            if command == ["refresh", "last"]:
+                result = refresh_eod(latest=True)
+            elif command == ["refresh"]:
+                result = refresh_eod()
+            else:
+                result = eod_status()
             return format_eod_reply(result)
         except EODNotReady as exc:
             return f"⌛ EOD sumber belum siap: {exc}. Coba lagi nanti; data lama tidak diubah."
