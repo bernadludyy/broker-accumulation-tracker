@@ -4513,7 +4513,7 @@ ADRO FIBO 20D | ADRO FIBO 50D | ADRO FIBO 100D
 /eod refresh
 → Ambil dan arsipkan EOD setelah 17.00 WIB; maks. 1 request ZAPI jika belum lengkap.
 /eod refresh last
-→ Pilih sesi IHSG terbaru dari arsip Neon; aman untuk akhir pekan/libur bursa.
+→ Baca sesi IHSG terbaru dari sumber lalu sinkronkan Neon; maks. 1 request ZAPI.
 /eod status
 → Cek kesiapan EOD Neon tanpa ZAPI.
 
