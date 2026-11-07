@@ -26,6 +26,34 @@ class EODNotReady(ValueError):
     """Today's completed and sufficiently covered EOD source is not ready."""
 
 
+def _latest_session_date(archive: MarketArchive, before: date) -> date | None:
+    """Newest observed IDX session before ``before``, without calendar guessing.
+
+    A valid history candle is sufficient evidence that the exchange had a
+    session even when the all-market stock-summary snapshot is missing.  This
+    lets ``/eod refresh last`` repair that missing summary with one bounded
+    exact-date request.
+    """
+    with archive._connect() as cn, cn.cursor() as cursor:
+        cursor.execute(
+            """SELECT max(trade_date)
+                 FROM (
+                       SELECT max(trade_date) AS trade_date
+                         FROM project_fabric.stock_summary_daily
+                        WHERE trade_date < %s
+                       UNION ALL
+                       SELECT max(trade_date) AS trade_date
+                         FROM project_fabric.stock_history_daily
+                        WHERE trade_date < %s
+                      ) observed_sessions""",
+            (before, before),
+        )
+        row = cursor.fetchone()
+    if not row or row[0] is None:
+        return None
+    return row[0] if isinstance(row[0], date) else date.fromisoformat(str(row[0])[:10])
+
+
 def _counts(archive: MarketArchive, target: date) -> tuple[int, int]:
     """(today's rows, previous session rows) from durable Neon warehouse."""
     with archive._connect() as cn, cn.cursor() as cursor:
@@ -79,22 +107,35 @@ def _validate(payload: Any, target: date, minimum: int) -> int:
 
 def refresh_eod(*, asof: datetime | None = None,
                 archive: MarketArchive | None = None,
-                gateway: DataGateway | None = None) -> dict[str, Any]:
-    """Idempotent manual refresh after 17:00 WIB; normally one ZAPI fetch."""
+                gateway: DataGateway | None = None,
+                latest: bool = False) -> dict[str, Any]:
+    """Idempotent EOD refresh with at most one exact-date ZAPI fetch.
+
+    The default mode refreshes today's completed session after 17:00 WIB.
+    ``latest=True`` selects the newest session observed in Neon before today;
+    it is therefore safe on weekends and exchange holidays.
+    """
     now = (asof or datetime.now(WIB)).astimezone(WIB)
     target = now.date()
-    if now.weekday() >= 5:
-        return {"status": "CLOSED", "date": target.isoformat(), "reason": "Akhir pekan: tidak ada sesi IHSG"}
-    if (now.hour, now.minute) < (17, 0):
-        return {"status": "TOO_EARLY", "date": target.isoformat(), "reason": "Gunakan setelah 17.00 WIB"}
+    if not latest:
+        if now.weekday() >= 5:
+            return {"status": "CLOSED", "date": target.isoformat(), "reason": "Akhir pekan: tidak ada sesi IHSG"}
+        if (now.hour, now.minute) < (17, 0):
+            return {"status": "TOO_EARLY", "date": target.isoformat(), "reason": "Gunakan setelah 17.00 WIB"}
 
     archive = archive or MarketArchive(service="broker-accumulation-tracker-eod")
     if not archive.ready:
         raise RuntimeError("Koneksi Neon EOD belum dikonfigurasi")
+    if latest:
+        selected = _latest_session_date(archive, now.date())
+        if selected is None:
+            raise EODNotReady("Belum ada tanggal sesi IHSG valid di arsip Neon")
+        target = selected
     existing, previous = _counts(archive, target)
     minimum = _minimum(previous)
     if existing >= minimum:
-        return {"status": "CURRENT", "date": target.isoformat(), "rows": existing, "zapi_calls": 0}
+        return {"status": "CURRENT", "date": target.isoformat(), "rows": existing,
+                "zapi_calls": 0, "selection": "LAST_SESSION" if latest else "TODAY"}
 
     token = os.getenv("ZPI_API_KEY", "").strip()
     if not token:
@@ -114,13 +155,16 @@ def refresh_eod(*, asof: datetime | None = None,
     if stored < source_rows:
         raise RuntimeError(f"Arsip Neon belum lengkap: {stored}/{source_rows}")
 
-    # Only a validated post-close snapshot may replace the shared raw view.
+    # Exact-date cache is safe for both modes.  Never let LAST_SESSION replace
+    # the canonical live view with a historical snapshot during today's trade.
     gateway.cache.set(DataGateway._cache_key("idx:stock-summary", params), payload)
-    gateway.cache.set(
-        DataGateway._cache_key("idx:stock-summary", {"length": 5000, "start": 0}), payload
-    )
+    if target == now.date():
+        gateway.cache.set(
+            DataGateway._cache_key("idx:stock-summary", {"length": 5000, "start": 0}), payload
+        )
     return {"status": "UPDATED", "date": target.isoformat(), "rows": stored,
-            "zapi_calls": gateway.usage()["totals"]["upstream_attempts"]}
+            "zapi_calls": gateway.usage()["totals"]["upstream_attempts"],
+            "selection": "LAST_SESSION" if latest else "TODAY"}
 
 
 def eod_status(*, asof: datetime | None = None,
@@ -138,6 +182,9 @@ def eod_status(*, asof: datetime | None = None,
 def format_eod_reply(result: dict[str, Any]) -> str:
     status = result["status"]
     date_str = result.get("date") or "N/A"
+    selection = result.get("selection")
+    mode_note = ("\nMode: LAST SESSION (tanggal sesi dipilih dari arsip Neon)"
+                 if selection == "LAST_SESSION" else "")
     if status in {"TOO_EARLY", "CLOSED"}:
         return f"🕓 EOD {date_str} belum diproses\n{result.get('reason', '')}\nZAPI: 0"
     if status == "STALE":
@@ -148,7 +195,7 @@ def format_eod_reply(result: dict[str, Any]) -> str:
         note = "Baru diperbarui" if status == "UPDATED" else "Sudah tersedia (tidak perlu fetch ulang)"
         return (f"✅ EOD {date_str} — {note}\n"
                 f"Stock Summary Neon: {result['rows']} saham\n"
-                f"ZAPI: {result.get('zapi_calls', 0)} panggilan\n"
+                f"ZAPI: {result.get('zapi_calls', 0)} panggilan{mode_note}\n"
                 "Ketik SETUP RANK untuk ranking terbaru.\n"
                 "Catatan: indikator/entry-plan EOD Bot 4 difinalisasi terpisah.")
     raise ValueError(f"Unknown EOD status: {status}")
