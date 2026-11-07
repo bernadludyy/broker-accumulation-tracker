@@ -40,6 +40,7 @@ class HelpGroupsTest(unittest.TestCase):
         self.assertNotIn("BROKER TOP BBRI YTD", screener)
 
         self.assertIn("/eod refresh", data)
+        self.assertIn("/eod refresh last", data)
         self.assertIn("INSIDER REFRESH BBRI", data)
         self.assertNotIn("AI CHECK BBRI", data)
 
