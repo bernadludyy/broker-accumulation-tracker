@@ -1,11 +1,12 @@
 """Offline tests: Buddy EOD commands never contact the real exchange or Neon."""
 import unittest
-from datetime import datetime
-from unittest.mock import Mock, patch
+from datetime import date, datetime
+from unittest.mock import MagicMock, Mock, patch
 from zoneinfo import ZoneInfo
 
 from project_fabric.eod_refresh import (
-    EODNotReady, _validate, eod_status, format_eod_reply, refresh_eod,
+    EODNotReady, _latest_session_date, _validate, eod_status,
+    format_eod_reply, refresh_eod,
 )
 
 WIB = ZoneInfo("Asia/Jakarta")
@@ -45,6 +46,68 @@ class EODRefreshTests(unittest.TestCase):
         self.assertEqual(result["zapi_calls"], 0)
         self.gateway.get_json.assert_not_called()
         self.archive.save_summary.assert_not_called()
+
+    def test_latest_session_date_uses_summary_and_history_not_calendar_math(self):
+        archive = MagicMock()
+        connection = archive._connect.return_value.__enter__.return_value
+        cursor = connection.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value = (date(2026, 11, 6),)
+
+        result = _latest_session_date(archive, date(2026, 11, 7))
+
+        self.assertEqual(result, date(2026, 11, 6))
+        sql, params = cursor.execute.call_args.args
+        self.assertIn("stock_summary_daily", sql)
+        self.assertIn("stock_history_daily", sql)
+        self.assertEqual(params, (date(2026, 11, 7), date(2026, 11, 7)))
+
+    @patch("project_fabric.eod_refresh._latest_session_date",
+           return_value=date(2026, 11, 6))
+    @patch("project_fabric.eod_refresh._counts", return_value=(963, 963))
+    def test_last_mode_selects_friday_on_saturday_without_zapi(self, _counts, _latest):
+        saturday = datetime(2026, 11, 7, 10, 0, tzinfo=WIB)
+        result = refresh_eod(
+            asof=saturday, archive=self.archive, gateway=self.gateway, latest=True,
+        )
+
+        self.assertEqual(result["status"], "CURRENT")
+        self.assertEqual(result["date"], "2026-11-06")
+        self.assertEqual(result["selection"], "LAST_SESSION")
+        self.assertEqual(result["zapi_calls"], 0)
+        self.gateway.get_json.assert_not_called()
+
+    @patch("project_fabric.eod_refresh._latest_session_date",
+           return_value=date(2026, 11, 6))
+    @patch("project_fabric.eod_refresh._counts", side_effect=[(0, 963), (963, 963)])
+    @patch.dict("os.environ", {"ZPI_API_KEY": "offline-test-key"})
+    def test_last_mode_repairs_missing_summary_with_one_exact_date_fetch(
+        self, _counts, _latest,
+    ):
+        saturday = datetime(2026, 11, 7, 10, 0, tzinfo=WIB)
+        self.gateway.get_json.return_value = sample("2026-11-06")
+
+        result = refresh_eod(
+            asof=saturday, archive=self.archive, gateway=self.gateway, latest=True,
+        )
+
+        self.assertEqual(result["status"], "UPDATED")
+        self.assertEqual(result["date"], "2026-11-06")
+        self.assertEqual(self.gateway.get_json.call_args.kwargs["params"]["date"],
+                         "2026-11-06")
+        self.assertEqual(self.gateway.cache.set.call_count, 1)
+        self.assertEqual(self.archive.save_summary.call_args.kwargs["completed_through"],
+                         "2026-11-06")
+
+    @patch("project_fabric.eod_refresh._latest_session_date", return_value=None)
+    def test_last_mode_fails_closed_when_neon_has_no_observed_session(self, _latest):
+        with self.assertRaises(EODNotReady):
+            refresh_eod(
+                asof=datetime(2026, 11, 7, 10, 0, tzinfo=WIB),
+                archive=self.archive,
+                gateway=self.gateway,
+                latest=True,
+            )
+        self.gateway.get_json.assert_not_called()
 
     @patch("project_fabric.eod_refresh._counts", side_effect=[(0, 963), (963, 963)])
     @patch.dict("os.environ", {"ZPI_API_KEY": "offline-test-key"})
@@ -98,6 +161,13 @@ class EODRefreshTests(unittest.TestCase):
         self.assertIn("SETUP RANK", msg)
         self.assertIn("Bot 4", msg)
 
+    def test_reply_identifies_last_session_selection(self):
+        msg = format_eod_reply({"status": "CURRENT", "date": "2026-11-06",
+                                "rows": 963, "zapi_calls": 0,
+                                "selection": "LAST_SESSION"})
+        self.assertIn("LAST SESSION", msg)
+        self.assertIn("arsip Neon", msg)
+
 
 class TelegramEODRoutingTests(unittest.TestCase):
     @patch("telegram_query_bot.authorized", return_value=True)
@@ -107,6 +177,18 @@ class TelegramEODRoutingTests(unittest.TestCase):
         result = command_result("/eod refresh", "123")
         self.assertIn("963", result)
         refresh.assert_called_once_with()
+
+    @patch("telegram_query_bot.authorized", return_value=True)
+    @patch("telegram_query_bot.refresh_eod",
+           return_value={"status": "CURRENT", "date": "2026-11-06",
+                         "rows": 963, "zapi_calls": 0,
+                         "selection": "LAST_SESSION"})
+    def test_refresh_last_command_reaches_latest_session_mode(self, refresh, _auth):
+        from telegram_query_bot import command_result
+        result = command_result("/eod refresh last", "123")
+        self.assertIn("2026-11-06", result)
+        self.assertIn("LAST SESSION", result)
+        refresh.assert_called_once_with(latest=True)
 
     @patch("telegram_query_bot.authorized", return_value=True)
     @patch("telegram_query_bot.eod_status", return_value={"status": "STALE", "date": "2026-10-14", "rows": 0, "zapi_calls": 0})
