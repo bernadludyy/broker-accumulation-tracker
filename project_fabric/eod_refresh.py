@@ -76,8 +76,9 @@ def _minimum(previous: int) -> int:
     Daily stock-summary membership is not perfectly constant (suspensions,
     listings and provider eligibility can change it).  Requiring 99% made a
     provider-declared complete 945-row snapshot fail after a 963-row session.
-    Keep the gate bounded: accept at most a 3% or 30-row decrease, while the
-    payload checks below still require matching total metadata when supplied.
+    Keep the gate bounded: accept at most a 3% or 30-row decrease.  The payload
+    checks below still require matching total metadata when the provider sends
+    it, and always reject mixed dates, duplicates and malformed stock codes.
     """
     if not previous:
         return MIN_ROWS
@@ -88,7 +89,7 @@ def _minimum(previous: int) -> int:
     )
 
 
-def _validate(payload: Any, target: date, minimum: int, *, previous: int = 0) -> int:
+def _validate(payload: Any, target: date, minimum: int) -> int:
     """Reject stale, mixed-date, duplicate or truncated exchange snapshots."""
     rows = _items(payload)
     if len(rows) < minimum or len(rows) >= 5000:
@@ -105,13 +106,11 @@ def _validate(payload: Any, target: date, minimum: int, *, previous: int = 0) ->
         codes.add(code)
 
     current = payload
-    has_declared_total = False
     for _ in range(6):
         if not isinstance(current, dict):
             break
         for key in ("total", "Total", "totalCount", "TotalCount"):
             if key in current and current[key] is not None:
-                has_declared_total = True
                 try:
                     total = int(current[key])
                 except (TypeError, ValueError) as exc:
@@ -119,10 +118,6 @@ def _validate(payload: Any, target: date, minimum: int, *, previous: int = 0) ->
                 if total != len(rows):
                     raise EODNotReady(f"Snapshot parsial: {len(rows)} dari {total} saham")
         current = current.get("data")
-    if previous and len(rows) < previous and not has_declared_total:
-        raise EODNotReady(
-            "Jumlah saham turun tetapi metadata total sumber tidak tersedia"
-        )
     return len(rows)
 
 
@@ -220,7 +215,7 @@ def refresh_eod(*, asof: datetime | None = None,
     minimum = _minimum(previous)
     if existing >= minimum:
         if latest and payload is not None and gateway_used is not None:
-            _validate(payload, target, minimum, previous=previous)
+            _validate(payload, target, minimum)
             _publish_summary_cache(
                 gateway_used, target, payload, canonical=target < now.date(),
             )
@@ -246,12 +241,10 @@ def refresh_eod(*, asof: datetime | None = None,
             url=os.getenv("ZPI_IDX_BASE_URL", "https://api.zapi.ink/v1/finance:idx").rstrip("/") + "/stock-summary",
             headers={"x-api-key": token, "accept": "application/json"},
             params=params, timeout=30, policy=CachePolicy(),
-            validate=lambda data: _validate(
-                data, target, minimum, previous=previous,
-            ) >= minimum,
+            validate=lambda data: _validate(data, target, minimum) >= minimum,
         )
 
-    source_rows = _validate(payload, target, minimum, previous=previous)
+    source_rows = _validate(payload, target, minimum)
     archive.save_summary(payload, completed_through=target.isoformat(), asof=now)
     stored, _ = _counts(archive, target)
     if stored < source_rows:
