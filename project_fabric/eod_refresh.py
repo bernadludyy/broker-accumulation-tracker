@@ -18,7 +18,8 @@ from .universe_intelligence import _items
 
 WIB = ZoneInfo("Asia/Jakarta")
 MIN_ROWS = 500
-_MIN_PREVIOUS_COVERAGE = 0.99
+_MIN_PREVIOUS_COVERAGE = 0.97
+_MAX_PREVIOUS_ROW_DROP = 30
 _CODE = re.compile(r"^[A-Z0-9]{1,15}$")
 
 
@@ -70,7 +71,22 @@ def _counts(archive: MarketArchive, target: date) -> tuple[int, int]:
 
 
 def _minimum(previous: int) -> int:
-    return max(MIN_ROWS, int(previous * _MIN_PREVIOUS_COVERAGE)) if previous else MIN_ROWS
+    """Coverage floor that permits small, legitimate IDX-universe changes.
+
+    Daily stock-summary membership is not perfectly constant (suspensions,
+    listings and provider eligibility can change it).  Requiring 99% made a
+    provider-declared complete 945-row snapshot fail after a 963-row session.
+    Keep the gate bounded: accept at most a 3% or 30-row decrease.  The payload
+    checks below still require matching total metadata when the provider sends
+    it, and always reject mixed dates, duplicates and malformed stock codes.
+    """
+    if not previous:
+        return MIN_ROWS
+    return max(
+        MIN_ROWS,
+        int(previous * _MIN_PREVIOUS_COVERAGE),
+        previous - _MAX_PREVIOUS_ROW_DROP,
+    )
 
 
 def _validate(payload: Any, target: date, minimum: int) -> int:
@@ -204,6 +220,7 @@ def refresh_eod(*, asof: datetime | None = None,
                 gateway_used, target, payload, canonical=target < now.date(),
             )
         return {"status": "CURRENT", "date": target.isoformat(), "rows": existing,
+                "previous_rows": previous,
                 "zapi_calls": (gateway_used.usage()["totals"]["upstream_attempts"]
                                if latest and gateway_used is not None else 0),
                 "selection": "LAST_SESSION" if latest else "TODAY"}
@@ -240,6 +257,7 @@ def refresh_eod(*, asof: datetime | None = None,
         gateway_used, target, payload, canonical=target == now.date() or latest,
     )
     return {"status": "UPDATED", "date": target.isoformat(), "rows": stored,
+            "previous_rows": previous,
             "zapi_calls": gateway_used.usage()["totals"]["upstream_attempts"],
             "selection": "LAST_SESSION" if latest else "TODAY"}
 
@@ -275,9 +293,16 @@ def format_eod_reply(result: dict[str, Any]) -> str:
             note = "Sesi terbaru terverifikasi"
         else:
             note = "Sudah tersedia (tidak perlu fetch ulang)"
+        previous = int(result.get("previous_rows") or 0)
+        coverage_note = ""
+        if previous and result["rows"] < previous:
+            coverage = result["rows"] / previous * 100
+            coverage_note = (f"\nCoverage tervalidasi: {result['rows']}/{previous} "
+                             f"({coverage:.1f}%)")
         return (f"✅ EOD {date_str} — {note}\n"
                 f"Stock Summary Neon: {result['rows']} saham\n"
-                f"ZAPI: {result.get('zapi_calls', 0)} panggilan{mode_note}\n"
+                f"ZAPI: {result.get('zapi_calls', 0)} panggilan{mode_note}"
+                f"{coverage_note}\n"
                 "Ketik SETUP RANK untuk ranking terbaru.\n"
                 "Catatan: indikator/entry-plan EOD Bot 4 difinalisasi terpisah.")
     raise ValueError(f"Unknown EOD status: {status}")
