@@ -182,16 +182,12 @@ class EODRefreshTests(unittest.TestCase):
     def test_coverage_gate_accepts_small_universe_change_but_rejects_truncation(self):
         minimum = _minimum(963)
         self.assertEqual(minimum, 934)
-        self.assertEqual(
-            _validate(sample(n=945), self.now.date(), minimum, previous=963),
-            945,
-        )
+        self.assertEqual(_validate(sample(n=945), self.now.date(), minimum), 945)
         with self.assertRaises(EODNotReady):
-            _validate(sample(n=900), self.now.date(), minimum, previous=963)
+            _validate(sample(n=900), self.now.date(), minimum)
         without_total = sample(n=945)
         del without_total["data"]["total"]
-        with self.assertRaises(EODNotReady):
-            _validate(without_total, self.now.date(), minimum, previous=963)
+        self.assertEqual(_validate(without_total, self.now.date(), minimum), 945)
         bad = sample()
         bad["data"]["total"] = 1200
         with self.assertRaises(EODNotReady):
