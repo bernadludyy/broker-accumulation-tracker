@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, Mock, patch
 from zoneinfo import ZoneInfo
 
 from project_fabric.eod_refresh import (
-    EODNotReady, _latest_session_date, _source_session_date, _validate, eod_status,
-    format_eod_reply, refresh_eod,
+    EODNotReady, _latest_session_date, _minimum, _source_session_date, _validate,
+    eod_status, format_eod_reply, refresh_eod,
 )
 
 WIB = ZoneInfo("Asia/Jakarta")
@@ -178,6 +178,20 @@ class EODRefreshTests(unittest.TestCase):
         bad["data"]["data"][1]["StockCode"] = "Z0000"
         with self.assertRaises(EODNotReady):
             _validate(bad, self.now.date(), 900)
+
+    def test_coverage_gate_accepts_small_universe_change_but_rejects_truncation(self):
+        minimum = _minimum(963)
+        self.assertEqual(minimum, 934)
+        self.assertEqual(
+            _validate(sample(n=945), self.now.date(), minimum, previous=963),
+            945,
+        )
+        with self.assertRaises(EODNotReady):
+            _validate(sample(n=900), self.now.date(), minimum, previous=963)
+        without_total = sample(n=945)
+        del without_total["data"]["total"]
+        with self.assertRaises(EODNotReady):
+            _validate(without_total, self.now.date(), minimum, previous=963)
         bad = sample()
         bad["data"]["total"] = 1200
         with self.assertRaises(EODNotReady):
@@ -202,6 +216,14 @@ class EODRefreshTests(unittest.TestCase):
                                 "selection": "LAST_SESSION"})
         self.assertIn("LAST SESSION", msg)
         self.assertIn("ZAPI/Neon", msg)
+
+    def test_reply_reports_accepted_coverage_decrease(self):
+        msg = format_eod_reply({"status": "UPDATED", "date": "2026-11-10",
+                                "rows": 945, "previous_rows": 963,
+                                "zapi_calls": 1})
+        self.assertIn("945/963", msg)
+        self.assertIn("98.1%", msg)
+        self.assertIn("Coverage tervalidasi", msg)
 
 
 class TelegramEODRoutingTests(unittest.TestCase):
