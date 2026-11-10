@@ -47,4 +47,8 @@ jobs:
         run: pip install -r requirements_github.txt
 
       - name: Run today's exact Telegram command
-        run: python broker_ytd_dispatch.py --text "/eod refresh"
+        run: |
+          result="$(python broker_ytd_dispatch.py --text "/eod refresh")"
+          printf '%s\n' "$result"
+          expected="✅ EOD $(TZ=Asia/Jakarta date +%F)"
+          grep -F "$expected" <<<"$result"
