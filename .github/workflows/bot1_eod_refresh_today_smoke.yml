@@ -1,0 +1,50 @@
+name: Bot1 EOD refresh-today smoke
+
+on:
+  pull_request:
+    paths:
+      - "project_fabric/eod_refresh.py"
+      - "telegram_query_bot.py"
+      - ".github/workflows/bot1_eod_refresh_today_smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bot1-eod-refresh-today-smoke
+  cancel-in-progress: false
+
+jobs:
+  telegram-smoke:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PROJECT_FABRIC_DATABASE_URL: ${{ secrets.PROJECT_FABRIC_DATABASE_URL }}
+      PROJECT_FABRIC_CACHE_NAMESPACE: shared-v1
+      PROJECT_FABRIC_DB_REQUIRED: "true"
+      ZPI_API_KEY: ${{ secrets.ZPI_API_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      DB_PATH: broker_tracker.db
+      PYTHONUTF8: "1"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements_github.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements_github.txt
+
+      - name: Run today's exact Telegram command
+        run: python broker_ytd_dispatch.py --text "/eod refresh"
