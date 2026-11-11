@@ -5,6 +5,7 @@ authorization, update-id dedupe, SQLite checkpoint and legacy commands.
 """
 from __future__ import annotations
 
+import re
 import telegram_query_bot as legacy
 from broker_ytd_matrix import format_broker_top, format_ticker_top
 from broker_persistence import format_persistence
@@ -16,6 +17,7 @@ from quality_trend import format_quality_trend
 from silent_accum import format_silent_accum
 from ai_decision_engine.telegram import format_ai_command, parse_ai_command
 from project_fabric.insider_intelligence import format_insider_report
+from orderflow_tape import ALIASES as TAPE_ALIASES, HELP as TAPE_HELP, TapeReport, build_report as build_tape_report, send_photo
 
 
 _SCREENER_HELP = """📊 SCREENER TEKNIKAL & FLOW
@@ -64,6 +66,28 @@ _ANALYSIS_HELP = """🧠 BOT1 AI DECISION (Neon EOD; repair histori maks. 1 ZAPI
 AI STATUS | AI CHECK BBRI | AI RUN BBRI
 → CHECK: 0 AI; RUN: maks. 3 API berbayar dan dinonaktifkan secara default."""
 
+_original_send_telegram = legacy.send_telegram
+
+
+def send_telegram_with_tape(text: str, chat_id: str | None = None) -> None:
+    if isinstance(text, TapeReport) and text.dashboard:
+        try:
+            send_photo(legacy.TELEGRAM_BOT_TOKEN, str(chat_id or legacy.TELEGRAM_CHAT_ID),
+                       text.dashboard, text.metrics["ticker"])
+        except Exception as exc:
+            print(f"[TAPE-DELIVERY] photo unavailable ({type(exc).__name__}); sending text")
+            text = str(text) + "\nFoto tidak terkirim; ringkasan angka tetap tersedia."
+    _original_send_telegram(text, chat_id)
+
+
+legacy.send_telegram = send_telegram_with_tape
+legacy.extend_help_section("ANALISIS", """📊 TAPE / FOOTPRINT / HAKA–HAKI
+/tape ELTY | /tape ELTY 60 | TAPE ELTY
+→ Gambar bubble tape, footprint, CVD parsial, VWAP, POC nilai, cetakan besar.
+→ Alias /footprint, /haka, /dna. On-demand, maks. 7 operasi ZAPI, 0 AI.
+→ 60 = 60 menit terakhir pada tape tersedia, bukan jaminan live.
+→ DNA/iceberg/identitas bandar tidak terverifikasi; tanggal/cakupan dilaporkan.""")
+
 _original_command_result = legacy.command_result
 legacy.extend_help_section("ANALISIS", _ANALYSIS_HELP)
 legacy.extend_help_section("SCREENER", _SCREENER_HELP)
@@ -75,6 +99,23 @@ def command_result(text: str, chat_id: str) -> str:
     parts = text.strip().split()
     if not parts:
         return _original_command_result(text, chat_id)
+
+    first_tape = parts[0].split("@")[0].lower()
+    if first_tape in TAPE_ALIASES:
+        if not legacy.authorized(chat_id):
+            return "⛔ TAPE hanya tersedia untuk chat pribadi pemilik bot."
+        if len(parts) not in (2, 3) or (len(parts) == 3 and parts[2] != "60"):
+            return TAPE_HELP
+        ticker = parts[1].upper().removesuffix(".JK")
+        if not re.fullmatch(r"[A-Z]{4}", ticker):
+            return TAPE_HELP
+        try:
+            return build_tape_report(ticker, window=60 if len(parts) == 3 else None)
+        except ValueError as exc:
+            return f"⚠️ TAPE {ticker}: {exc}"
+        except Exception as exc:
+            print(f"[TAPE-ERROR] {type(exc).__name__}")
+            return f"⚠️ TAPE {ticker} belum tersedia ({type(exc).__name__}). Coba kembali; /flow {ticker} untuk konteks EOD."
 
     # Read-only check by default. Legacy owner authorization is checked BEFORE DB/LLM.
     ai_request = parse_ai_command(text)
