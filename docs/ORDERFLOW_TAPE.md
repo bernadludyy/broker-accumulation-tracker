@@ -9,7 +9,7 @@ or rendering fails, text remains available. Existing `/flow ELTY` stays EOD.
 ## Data and request budget
 
 Uses existing ZAPI key and gateway: `finance:pluang/tradebook` (ALL), `summary`,
-`chart`, `orderbook`, then at most 3 pages of `running-trades` with `minLot=0`
+`chart`, `orderbook`, then at most 3 pages of `running-trades` with `minLot=1`
 and both BUY/SELL sides. No scheduler, AI calls or full-market scan. At most
 7 gateway operations; existing bounded GET retries can increase HTTP hits.
 Repeated cursors stop pagination. Sequences deduplicate prints across pages;

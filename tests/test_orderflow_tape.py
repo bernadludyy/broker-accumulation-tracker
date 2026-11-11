@@ -76,7 +76,7 @@ class TapeTests(unittest.TestCase):
         self.assertTrue(out['has_more'])
         for endpoint,params in calls:
             if endpoint=='running-trades':
-                self.assertEqual(params['minLot'],0)
+                self.assertEqual(params['minLot'],1)
                 self.assertNotIn('action',params)
 
     def test_repeated_cursor_stops_and_partial_failure_survives(self):

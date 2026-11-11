@@ -220,14 +220,15 @@ def fetch_payloads(ticker: str, fetcher=None) -> dict:
             out["warnings"].append(f"{endpoint} tidak tersedia ({type(exc).__name__}).")
     cursor, seen_cursors = None, set()
     for _ in range(MAX_PAGES):
-        params = {"code": ticker, "minLot": 0}
+        params = {"code": ticker, "minLot": 1}
         if cursor:
             params["cursor"] = cursor
         out["requests"] += 1
         try:
             data = unwrap(fetcher("running-trades", params))
         except Exception as exc:
-            out["warnings"].append(f"running-trades tidak tersedia ({type(exc).__name__}).")
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            out["warnings"].append(f"running-trades tidak tersedia ({type(exc).__name__}, HTTP {status or 'N/A'}).")
             break
         out["pages"] += 1
         out["prints"].extend(rows(data, "items"))
