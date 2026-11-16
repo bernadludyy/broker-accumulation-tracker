@@ -10,6 +10,7 @@ import telegram_query_bot as legacy
 from broker_ytd_matrix import format_broker_top, format_ticker_top
 from broker_persistence import format_persistence
 from broker_stalker import ALLOWED_LOOKBACKS, format_broker_stalker
+from broker_watch import MAX_LIMIT as BROKER_WATCH_MAX_LIMIT, format_broker_watch
 from bandar_momentum import format_bandar_momentum
 from bull_divergence import format_bull_divergence
 from market_combos import format_market_combo
@@ -42,6 +43,10 @@ MARKET COMBO 2 LIVE | MARKET COMBO 2 EOD
 → LIVE konfirmasi bid/offer; EOD memakai cache tanpa orderbook."""
 
 _BROKER_HELP = """🏆 BROKER INTELLIGENCE & YTD MATRIX
+BROKER WATCH NI | BROKER WATCH NI 10D 5
+→ Kandidat net buy NI dari cache EOD + tekanan Tradebook live sebagai PROXY.
+→ Identitas broker intraday tidak diklaim; owner-only, maks. 6 ZAPI, 0 AI.
+
 BROKER STALKER | BROKER STALKER 10D 6
 → Saham yang net buy oleh banyak broker; default 5 sesi, maks. 10 hasil.
 
@@ -298,6 +303,55 @@ def command_result(text: str, chat_id: str) -> str:
             lookback=lookback,
             limit=limit,
         )
+
+    is_broker_watch = (
+        (first == "broker" and len(parts) >= 2 and parts[1].upper() == "WATCH")
+        or first in {"/brokerwatch", "brokerwatch", "/broker_watch", "broker_watch"}
+    )
+    if is_broker_watch:
+        if not legacy.authorized(chat_id):
+            return "⛔ BROKER WATCH hanya tersedia untuk chat pribadi pemilik bot."
+        options = parts[2:] if first == "broker" else parts[1:]
+        format_hint = (
+            "Format: BROKER WATCH NI [5D|10D|20D] "
+            f"[1-{BROKER_WATCH_MAX_LIMIT}]"
+        )
+        if not options:
+            return format_hint
+        broker_code = options[0].strip().upper()
+        if not re.fullmatch(r"[A-Z0-9]{2,5}", broker_code):
+            return format_hint
+        lookback = 5
+        limit = 3
+        seen_period = False
+        seen_limit = False
+        for option in options[1:]:
+            upper = option.upper()
+            if upper in {"5D", "10D", "20D"}:
+                if seen_period:
+                    return format_hint
+                lookback = int(upper[:-1])
+                seen_period = True
+            elif option.isdigit() and 1 <= int(option) <= BROKER_WATCH_MAX_LIMIT:
+                if seen_limit:
+                    return format_hint
+                limit = int(option)
+                seen_limit = True
+            else:
+                return format_hint
+        try:
+            return format_broker_watch(
+                str(legacy.DB_PATH), broker_code, legacy.safe_end_date(),
+                lookback=lookback, limit=limit,
+            )
+        except ValueError as exc:
+            return f"⚠️ BROKER WATCH {broker_code}: {exc}"
+        except Exception as exc:
+            print(f"[BROKER-WATCH-ERROR] {type(exc).__name__}")
+            return (
+                f"⚠️ BROKER WATCH {broker_code} belum tersedia "
+                f"({type(exc).__name__}). Coba kembali."
+            )
 
     if first == "broker" and len(parts) >= 2 and parts[1].upper() == "PERSIST":
         if len(parts) != 3:
