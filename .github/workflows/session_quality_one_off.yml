@@ -1,0 +1,61 @@
+name: One-time private session screener verification
+
+on:
+  pull_request:
+    types: [opened]
+    branches: [feat/private-session-quality]
+    paths: ['.github/workflows/session_quality_one_off.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'verify/private-session-quality'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PROJECT_FABRIC_DATABASE_URL: ${{ secrets.PROJECT_FABRIC_DATABASE_URL }}
+      PROJECT_FABRIC_CACHE_NAMESPACE: shared-v1
+      PROJECT_FABRIC_DB_REQUIRED: 'true'
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements_github.txt
+      - run: pip install -r requirements_github.txt
+      - name: Validate EOD command output and deliver one private test
+        run: |
+          python - <<'PY'
+          import re
+          from datetime import datetime
+          from bot_io import send_message
+          from broker_ytd_dispatch import command_result, legacy
+          from session_screener import WIB, _expected_eod_date
+
+          target = legacy.TELEGRAM_CHAT_ID
+          if not re.fullmatch(r"[1-9][0-9]*", target):
+              raise SystemExit("Private recipient is not configured")
+          day = _expected_eod_date(datetime.now(WIB))
+          for kind in ("BPJS", "BSJP"):
+              report = command_result(f"{kind} EOD QUALITY 3", target)
+              if not report.startswith(f"🔎 {kind} EOD QUALITY | {day}\n"):
+                  if report.startswith(f"🔎 {kind} EOD QUALITY | "):
+                      print("Latest archive date did not match", day)
+                  else:
+                      print(report.splitlines()[0])
+                  raise SystemExit("EOD report did not use the latest completed session")
+              if "Sumber: NEON DAILY EOD SNAPSHOT" not in report:
+                  raise SystemExit("EOD report source did not match")
+              counts = next(line for line in report.splitlines() if line.startswith("Diperiksa "))
+              print(f"{kind} {day}: {counts}")
+          response = send_message(legacy.TELEGRAM_BOT_TOKEN, target, report)
+          if response["result"]["chat"]["type"] != "private":
+              raise SystemExit("Telegram did not confirm a private destination")
+          print("Telegram accepted the BSJP EOD QUALITY report in a private chat.")
+          PY
