@@ -39,7 +39,7 @@ from project_fabric.fundamental_intelligence import (
 from project_fabric.bot1_rank import format_bot1_rank
 from project_fabric.eod_refresh import EODNotReady, eod_status, refresh_eod, format_eod_reply
 from project_fabric.eod_flow import format_eod_flow
-from session_screener import format_session_screener
+from session_screener import SESSION_USAGE, format_session_screener
 from foreign_entry import evaluate_foreign_entry
 from entry_engine import (
     add_indicators,
@@ -4412,6 +4412,8 @@ SETUP RANK | SETUP RANK 10
 🕘 SCREENER SESI BSJP/BPJS
 BSJP LIVE | BSJP EOD | BPJS LIVE | BPJS EOD
 → Tambahkan jumlah 1-20, contoh: BSJP LIVE 10.
+→ Chat pribadi: BSJP LIVE QUALITY 10 atau BPJS EOD QUALITY 10.
+→ QUALITY LIVE: BPJS 09.30–11.29, BSJP 14.30–15.49 WIB. EOD untuk sesi berikutnya.
 → LIVE memakai snapshot pasar; EOD adalah pantauan sesi berikutnya.
 
 🧠 UNIVERSE SMART V2 (cache Neon, 0 extra ZAPI)
@@ -4802,12 +4804,23 @@ def command_result(text: str, chat_id: str) -> str:
         return HELP_TEXT
 
     if first_lower.lstrip("/").upper() in {"BSJP", "BPJS"}:
-        if len(parts) > 3 or (len(parts) >= 2 and parts[1].upper() not in {"LIVE", "EOD"}) or (len(parts) == 3 and (not parts[2].isdigit() or not 1 <= int(parts[2]) <= 20)):
-            return "Format: BSJP|BPJS LIVE|EOD [1-20]"
         kind = first_lower.lstrip("/").upper()
         mode = parts[1].upper() if len(parts) >= 2 else "LIVE"
+        options = parts[2:]
+        quality = bool(options and options[0].upper() == "QUALITY")
+        if quality:
+            options = options[1:]
+        if mode not in {"LIVE", "EOD"} or len(options) > 1:
+            return SESSION_USAGE
+        if options and not re.fullmatch(r"0*(?:[1-9]|1[0-9]|20)", options[0]):
+            return SESSION_USAGE
+        limit = int(options[0].lstrip("0")) if options else 10
+        if quality and (not authorized(chat_id) or not re.fullmatch(r"[1-9][0-9]*", str(chat_id))):
+            return "⛔ Profil QUALITY hanya tersedia di chat pribadi pemilik Bot 1."
         try:
-            return format_session_screener(kind, mode, int(parts[2]) if len(parts) == 3 else 10)
+            if quality:
+                return format_session_screener(kind, mode, limit, quality=True)
+            return format_session_screener(kind, mode, limit)
         except Exception as exc:
             print(f"[SESSION-SCREENER-ERROR] {type(exc).__name__}: {exc}", file=sys.stderr)
             return f"❌ {kind} {mode}: data cache/Neon belum dapat dibaca. Cek /eod status untuk mode EOD."
