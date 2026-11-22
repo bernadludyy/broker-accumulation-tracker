@@ -169,6 +169,26 @@ class GainerCommandRoutingTests(unittest.TestCase):
             dispatcher.legacy, "safe_end_date", return_value="2026-11-20"
         ):
             self.assertEqual(
+                dispatcher.command_result("GAINER PROGRESS", "1"), "SCAN"
+            )
+            scan.assert_called_with(
+                str(dispatcher.legacy.DB_PATH),
+                "2026-11-20",
+                mode="EOD",
+                limit=10,
+                title="GAINER PROGRESS",
+            )
+            self.assertEqual(
+                dispatcher.command_result("GAINER PROGRESS LIVE 5", "1"), "SCAN"
+            )
+            scan.assert_called_with(
+                str(dispatcher.legacy.DB_PATH),
+                "2026-11-20",
+                mode="LIVE",
+                limit=5,
+                title="GAINER PROGRESS",
+            )
+            self.assertEqual(
                 dispatcher.command_result("GAINER PROGRESS NTBK", "1"), "DETAIL"
             )
             detail.assert_called_with(
@@ -188,6 +208,9 @@ class GainerCommandRoutingTests(unittest.TestCase):
             )
         self.assertIn("PRE GAINER", dispatcher.command_result("/help", "1"))
         self.assertIn("Format:", dispatcher.command_result("PRE GAINER 20", "1"))
+        self.assertIn(
+            "Format:", dispatcher.command_result("GAINER PROGRESS LIVE 20", "1")
+        )
 
 
 if __name__ == "__main__":
