@@ -112,6 +112,27 @@ class GainerProgressTests(unittest.TestCase):
         self.assertFalse(row["eligible"])
         self.assertIn("belum tersedia", " ".join(row["reasons"]))
 
+    def test_stale_broker_outside_latest_five_is_unavailable(self):
+        stale = [{
+            "date": BROKER_DATES[0],
+            "broker": "XL",
+            "buy_value": 10_000_000.0,
+            "sell_value": 0.0,
+            "buy_lots": 2_500.0,
+            "sell_lots": 0.0,
+        }]
+        report = feature.analyze_gainer_progress(
+            [market_row()],
+            {"AAAA": history()},
+            {"AAAA": stale},
+            BROKER_DATES,
+            market_day=MARKET_DAY,
+            ticker="AAAA",
+        )
+        row = report["diagnostics"][0]
+        self.assertFalse(row["eligible"])
+        self.assertIn("belum tersedia", " ".join(row["reasons"]))
+
     def test_pre_gainer_ranking_excludes_late_rows(self):
         report = feature.analyze_gainer_progress(
             [market_row(close=109.0)],
