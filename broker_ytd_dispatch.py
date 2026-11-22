@@ -23,8 +23,8 @@ from orderflow_tape import ALIASES as TAPE_ALIASES, HELP as TAPE_HELP, TapeRepor
 
 
 _SCREENER_HELP = """📊 SCREENER TEKNIKAL & FLOW
-GAINER PROGRESS BBRI | GAINER PROGRESS BBRI LIVE
-→ Fase broker-flow satu saham, lonjakan lot relatif, rotasi, breakout, dan status LATE; alias /gainer_progress.
+GAINER PROGRESS | GAINER PROGRESS LIVE 10 | GAINER PROGRESS BBRI
+→ Tanpa ticker memilih kandidat otomatis; dengan ticker membuka fase, lot relatif, rotasi, breakout, dan status LATE.
 
 PRE GAINER | PRE GAINER EOD 10 | PRE GAINER LIVE 10
 → Ranking ACCUMULATION → ABSORPTION/ROTATION → PRE-IGNITION; mengecualikan IGNITION/LATE; alias /pre_gainer.
@@ -144,20 +144,52 @@ def command_result(text: str, chat_id: str) -> str:
     )
     if is_gainer_progress:
         options = parts[2:] if first == "gainer" else parts[1:]
-        format_hint = "Format: GAINER PROGRESS TICKER [EOD|LIVE]"
-        if not 1 <= len(options) <= 2:
-            return format_hint
-        ticker = options[0].strip().upper().replace(".JK", "")
-        if not legacy.TICKER_RE.fullmatch(ticker):
-            return format_hint
-        mode = options[1].strip().upper() if len(options) == 2 else "EOD"
-        if mode not in {"EOD", "LIVE"}:
-            return format_hint
-        return format_gainer_progress(
-            ticker,
+        format_hint = (
+            "Format: GAINER PROGRESS [EOD|LIVE] [1-15] "
+            "atau GAINER PROGRESS TICKER [EOD|LIVE]"
+        )
+
+        # A ticker switches to the detailed single-stock view.  Without a
+        # ticker, the same command ranks market-wide pre-gainer candidates.
+        if options:
+            ticker = options[0].strip().upper().replace(".JK", "")
+            if ticker not in {"EOD", "LIVE"} and legacy.TICKER_RE.fullmatch(ticker):
+                if len(options) > 2:
+                    return format_hint
+                mode = options[1].strip().upper() if len(options) == 2 else "EOD"
+                if mode not in {"EOD", "LIVE"}:
+                    return format_hint
+                return format_gainer_progress(
+                    ticker,
+                    str(legacy.DB_PATH),
+                    legacy.safe_end_date(),
+                    mode=mode,
+                )
+
+        mode = "EOD"
+        limit = 10
+        mode_seen = False
+        limit_seen = False
+        for option in options:
+            upper = option.upper()
+            if upper in {"EOD", "LIVE"}:
+                if mode_seen:
+                    return format_hint
+                mode = upper
+                mode_seen = True
+            elif option.isdigit() and 1 <= int(option) <= 15:
+                if limit_seen:
+                    return format_hint
+                limit = int(option)
+                limit_seen = True
+            else:
+                return format_hint
+        return format_pre_gainer(
             str(legacy.DB_PATH),
             legacy.safe_end_date(),
             mode=mode,
+            limit=limit,
+            title="GAINER PROGRESS",
         )
 
     is_pre_gainer = (

@@ -647,7 +647,7 @@ def format_gainer_progress(
     if normalized_mode == "LIVE" and not _market_in_progress(now):
         return "\n".join(
             (
-                "? GAINER PROGRESS LIVE - HANYA JAM BURSA",
+                "⌛ GAINER PROGRESS LIVE — HANYA JAM BURSA",
                 f"Gunakan GAINER PROGRESS {code} EOD di luar jam bursa.",
                 "Tidak ada request ZAPI yang digunakan.",
             )
@@ -663,7 +663,7 @@ def format_gainer_progress(
     except Exception as exc:
         print(f"[GAINER-PROGRESS-ERROR] {type(exc).__name__}: {str(exc)[:200]}")
         detail = str(exc) if isinstance(exc, ValueError) else "Data cache/Neon gagal dibaca; coba lagi."
-        return f"? GAINER PROGRESS {code} - DATA BELUM VALID\n{detail}"
+        return f"⏳ GAINER PROGRESS {code} — DATA BELUM VALID\n{detail}"
 
     lines = [
         f"📈 GAINER PROGRESS — {code} | {normalized_mode} {market_day}",
@@ -740,16 +740,20 @@ def format_pre_gainer(
     mode: str = "EOD",
     limit: int = 10,
     now: datetime | None = None,
+    title: str = "PRE GAINER",
 ) -> str:
     normalized_mode = mode.strip().upper()
+    display_title = str(title).strip().upper()
+    if display_title not in {"PRE GAINER", "GAINER PROGRESS"}:
+        display_title = "PRE GAINER"
     if normalized_mode not in {"EOD", "LIVE"} or not 1 <= int(limit) <= 15:
-        return "Format: PRE GAINER [EOD|LIVE] [1-15]"
+        return f"Format: {display_title} [EOD|LIVE] [1-15]"
     now = (now or datetime.now(WIB)).astimezone(WIB)
     if normalized_mode == "LIVE" and not _market_in_progress(now):
         return "\n".join(
             (
-                "? PRE GAINER LIVE - HANYA JAM BURSA",
-                "Gunakan PRE GAINER atau PRE GAINER EOD di luar jam bursa.",
+                f"⌛ {display_title} LIVE — HANYA JAM BURSA",
+                f"Gunakan {display_title} atau {display_title} EOD di luar jam bursa.",
                 "Tidak ada request ZAPI yang digunakan.",
             )
         )
@@ -764,10 +768,10 @@ def format_pre_gainer(
     except Exception as exc:
         print(f"[PRE-GAINER-ERROR] {type(exc).__name__}: {str(exc)[:200]}")
         detail = str(exc) if isinstance(exc, ValueError) else "Data cache/Neon gagal dibaca; coba lagi."
-        return f"? PRE GAINER {normalized_mode} - DATA BELUM VALID\n{detail}"
+        return f"⏳ {display_title} {normalized_mode} — DATA BELUM VALID\n{detail}"
 
     lines = [
-        f"🚦 PRE GAINER — {normalized_mode} {market_day}",
+        f"{'📈' if display_title == 'GAINER PROGRESS' else '🚦'} {display_title} — {normalized_mode} {market_day}",
         f"Sumber pasar: {source}",
         f"Broker terlihat sampai: {broker_report['dates'][-1] if broker_report['dates'] else 'N/A'}",
         "Fase: ACCUMULATION → ABSORPTION/ROTATION → PRE-IGNITION",
@@ -780,7 +784,7 @@ def format_pre_gainer(
     ]
     selected = report["rows"][: int(limit)]
     if not selected:
-        lines.append("Belum ada saham yang memenuhi seluruh syarat pre-gainer.")
+        lines.append("Belum ada saham yang memenuhi seluruh syarat kandidat gainer.")
     for index, row in enumerate(selected, 1):
         if index > 1:
             lines.append("")
