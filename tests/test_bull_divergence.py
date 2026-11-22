@@ -157,9 +157,8 @@ class BullDivergenceTests(unittest.TestCase):
             return_value=("2026-08-29", summaries, {"TEST": history}, regime_rows),
         ), patch.object(feature, "analyze_divergence", return_value=None):
             report = feature.format_bull_divergence(ticker="TEST", limit=1)
-        self.assertIn("Market Gate: BEARISH  CASH", report)
+        self.assertIn("Market Gate: BEARISH → CASH", report)
 
 
 if __name__ == "__main__":
     unittest.main()
-
