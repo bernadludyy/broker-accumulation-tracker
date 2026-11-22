@@ -299,6 +299,11 @@ def _broker_snapshot(
     latest_day = observed_dates[-1]
     last5 = reference_dates[-5:]
     current = _sum_window(flows, last5)
+    # A ticker can exist in the 20-session cache but have no visible broker row
+    # in the latest five reference sessions. Treat that as unavailable data,
+    # not as zero activity and never call max() on an empty mapping.
+    if not current:
+        return None
     positive = [
         (broker, values)
         for broker, values in current.items()
@@ -661,7 +666,7 @@ def format_gainer_progress(
         return f"? GAINER PROGRESS {code} - DATA BELUM VALID\n{detail}"
 
     lines = [
-        f"?? GAINER PROGRESS - {code} | {normalized_mode} {market_day}",
+        f"📈 GAINER PROGRESS — {code} | {normalized_mode} {market_day}",
         f"Sumber pasar: {source}",
         f"Broker terlihat sampai: {broker_report['dates'][-1] if broker_report['dates'] else 'N/A'}",
     ]
@@ -688,7 +693,7 @@ def format_gainer_progress(
     ]
     if broker["rotation"]:
         lines.append(
-            f"Broker rotation: {broker['previous_leader']}  {broker['leader']}."
+            f"Broker rotation: {broker['previous_leader']} → {broker['leader']}."
         )
     if broker["leader_daily"]:
         lines += ["", f"Jejak {broker['leader']} (maks. 10 sesi terlihat):"]
@@ -762,10 +767,10 @@ def format_pre_gainer(
         return f"? PRE GAINER {normalized_mode} - DATA BELUM VALID\n{detail}"
 
     lines = [
-        f"?? PRE GAINER - {normalized_mode} {market_day}",
+        f"🚦 PRE GAINER — {normalized_mode} {market_day}",
         f"Sumber pasar: {source}",
         f"Broker terlihat sampai: {broker_report['dates'][-1] if broker_report['dates'] else 'N/A'}",
-        "Fase: ACCUMULATION  ABSORPTION/ROTATION  PRE-IGNITION",
+        "Fase: ACCUMULATION → ABSORPTION/ROTATION → PRE-IGNITION",
         "IGNITION dan LATE/EXTENDED sengaja dikeluarkan agar tidak mengejar harga.",
         (
             f"Pasar {report['market_count']} | Histori valid {report['history_valid_count']} "
