@@ -415,14 +415,14 @@ def format_bull_divergence(
     except Exception as exc:
         print(f"[BULL-DIV-ERROR] {type(exc).__name__}: {str(exc)[:200]}")
         detail = str(exc) if isinstance(exc, ValueError) else "Data Neon gagal dibaca; coba lagi."
-        return f"? BULL DIVERGENCE - DATA BELUM VALID\n{detail}"
+        return f"⏳ BULL DIVERGENCE — DATA BELUM VALID\n{detail}"
 
     lines = [
-        f"?? BULL DIVERGENCE - EOD {market_day}",
-        "Tahap: EARLY  VALIDATED  CONFIRMED; LATE tidak boleh dikejar.",
-        f"Market Gate: {regime.label}  {regime.mode}",
+        f"📈 BULL DIVERGENCE — EOD {market_day}",
+        "Tahap: EARLY → VALIDATED → CONFIRMED; LATE tidak boleh dikejar.",
+        f"Market Gate: {regime.label} → {regime.mode}",
         f"Universe {len(summaries)} | Histori valid {sum(bool(histories.get(str(row['ticker']).upper())) for row in summaries)} | Kandidat {len(candidates)}",
-        "Filter: pivot berurutan | tanpa lower low di tengah | RSI gap �3 | pivot �7 sesi.",
+        "Filter: pivot berurutan | tanpa lower low di tengah | RSI gap ≥3 | pivot ≤7 sesi.",
         "",
     ]
     shown = candidates[:max(1, min(int(limit), 10))]
@@ -433,8 +433,8 @@ def format_bull_divergence(
         pivot_state = "confirmed" if row["pivot_confirmed"] else "provisional"
         lines.extend((
             f"{index}. {row['ticker']} | {row['status']} | Score {row['score']:.0f}",
-            f"   Harga: {row['first_date']} {row['first_low']:,.0f}  {row['second_date']} {row['second_low']:,.0f} (LL {row['price_lower_pct']:.2f}%)",
-            f"   RSI14: {row['first_rsi']:.1f}  {row['second_rsi']:.1f} (HL +{row['rsi_gap']:.1f}) | kini {row['latest_rsi']:.1f}",
+            f"   Harga: {row['first_date']} {row['first_low']:,.0f} → {row['second_date']} {row['second_low']:,.0f} (LL {row['price_lower_pct']:.2f}%)",
+            f"   RSI14: {row['first_rsi']:.1f} → {row['second_rsi']:.1f} (HL +{row['rsi_gap']:.1f}) | kini {row['latest_rsi']:.1f}",
             f"   Close {row['current_close']:,.0f} | dari low +{row['extension_pct']:.1f}% | Vol/MA20 {volume} | F5D {_rupiah(row['foreign_5d'])}",
             f"   Trigger >{row['trigger_price']:,.0f} | Invalid <{row['invalidation_price']:,.0f} | pivot {pivot_state}",
         ))
@@ -442,12 +442,11 @@ def format_bull_divergence(
         "",
         "EARLY = pivot provisional; VALIDATED = satu candle reversal; CONFIRMED = pivot + break high.",
         "LATE/EXTENDED = harga >5% atau >1.25 ATR dari low; tunggu pullback.",
-        "ZAPI: 0 request - seluruh data dari Neon EOD.",
+        "ZAPI: 0 request — seluruh data dari Neon EOD.",
         (
-            "?? Market Gate CASH: hanya watchlist, jangan entry."
+            "⚠️ Market Gate CASH: hanya watchlist, jangan entry."
             if regime.mode == "CASH"
-            else "?? Tetap wajib cek broker/foreign, R:R, dan Bot 4 sebelum entry."
+            else "⚠️ Tetap wajib cek broker/foreign, R:R, dan Bot 4 sebelum entry."
         ),
     ))
     return "\n".join(lines)
-
