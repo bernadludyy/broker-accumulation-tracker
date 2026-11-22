@@ -22,61 +22,61 @@ from project_fabric.insider_intelligence import format_insider_report
 from orderflow_tape import ALIASES as TAPE_ALIASES, HELP as TAPE_HELP, TapeReport, build_report as build_tape_report, send_photo
 
 
-_SCREENER_HELP = """?? SCREENER TEKNIKAL & FLOW
+_SCREENER_HELP = """📊 SCREENER TEKNIKAL & FLOW
 GAINER PROGRESS BBRI | GAINER PROGRESS BBRI LIVE
- Fase broker-flow satu saham, lonjakan lot relatif, rotasi, breakout, dan status LATE; alias /gainer_progress.
+→ Fase broker-flow satu saham, lonjakan lot relatif, rotasi, breakout, dan status LATE; alias /gainer_progress.
 
 PRE GAINER | PRE GAINER EOD 10 | PRE GAINER LIVE 10
- Ranking ACCUMULATION  ABSORPTION/ROTATION  PRE-IGNITION; mengecualikan IGNITION/LATE; alias /pre_gainer.
+→ Ranking ACCUMULATION → ABSORPTION/ROTATION → PRE-IGNITION; mengecualikan IGNITION/LATE; alias /pre_gainer.
 
 SILENT ACCUM | SILENT ACCUM 10 | SILENT ACCUM BBRI
- Area low 60D + value sepi + broker yang sama net buy �3/5 sesi; alias /silent_accum, 0 ZAPI.
+→ Area low 60D + value sepi + broker yang sama net buy ≥3/5 sesi; alias /silent_accum, 0 ZAPI.
 
 BANDAR MOMENTUM | BANDAR MOMENTUM EOD 10
- Broker + Value + EMA20 + RS + RSI + return; EOD default dan 0 ZAPI.
+→ Broker + Value + EMA20 + RS + RSI + return; EOD default dan 0 ZAPI.
 BANDAR MOMENTUM LIVE 10
- Harga/value berjalan memakai 1 snapshot ZAPI; alias /bandar_momentum.
+→ Harga/value berjalan memakai 1 snapshot ZAPI; alias /bandar_momentum.
 
 BULL DIV | BULL DIV 10 | BULL DIV BBRI
- Bullish divergence harga vs RSI14 dari pivot EOD Neon; alias /bulldiv, 0 ZAPI.
+→ Bullish divergence harga vs RSI14 dari pivot EOD Neon; alias /bulldiv, 0 ZAPI.
 
 RATIO TREND | RATIO TREND 10 | RATIO TREND BBRI
- Quality-ratio + MA + RSI/MACD/volume/foreign/R:R; alias QUALITY TREND dan /ratiotrend.
+→ Quality-ratio + MA + RSI/MACD/volume/foreign/R:R; alias QUALITY TREND dan /ratiotrend.
 
 MARKET COMBO 1 LIVE | MARKET COMBO 1 EOD
 MARKET COMBO 2 LIVE | MARKET COMBO 2 EOD
- Format umum: MARKET COMBO [1|2] [LIVE|EOD] [1-10].
- COMBO 1: High ATS; COMBO 2: Top Value � Top Frequency.
- LIVE konfirmasi bid/offer; EOD memakai cache tanpa orderbook."""
+→ Format umum: MARKET COMBO [1|2] [LIVE|EOD] [1-10].
+→ COMBO 1: High ATS; COMBO 2: Top Value ∩ Top Frequency.
+→ LIVE konfirmasi bid/offer; EOD memakai cache tanpa orderbook."""
 
-_BROKER_HELP = """?? BROKER INTELLIGENCE & YTD MATRIX
+_BROKER_HELP = """🏆 BROKER INTELLIGENCE & YTD MATRIX
 BROKER WATCH NI | BROKER WATCH NI 10D 5
- Kandidat net buy NI dari cache EOD + tekanan Tradebook live sebagai PROXY.
- Identitas broker intraday tidak diklaim; owner-only, maks. 6 ZAPI, 0 AI.
+→ Kandidat net buy NI dari cache EOD + tekanan Tradebook live sebagai PROXY.
+→ Identitas broker intraday tidak diklaim; owner-only, maks. 6 ZAPI, 0 AI.
 
 BROKER STALKER | BROKER STALKER 10D 6
- Saham yang net buy oleh banyak broker; default 5 sesi, maks. 10 hasil.
+→ Saham yang net buy oleh banyak broker; default 5 sesi, maks. 10 hasil.
 
 BROKER PERSIST BBRI
- Persistensi broker 5/10/20 sesi, net buy terkini vs YTD, dan intensitas.
+→ Persistensi broker 5/10/20 sesi, net buy terkini vs YTD, dan intensitas.
 
 BROKER TOP BBRI YTD
- Top 3 broker Net Buy + Net Sell untuk satu saham.
+→ Top 3 broker Net Buy + Net Sell untuk satu saham.
 CC NI TOP YTD | CC NI TOP SELL YTD
- Top 3 saham Net Buy/Net Sell oleh broker NI.
- Ranking memakai histori cache; PARTIAL/UNVERIFIED berarti coverage belum pasti.
- Avg = total value sisi � (total lot sisi x 100), bukan average posisi net."""
+→ Top 3 saham Net Buy/Net Sell oleh broker NI.
+→ Ranking memakai histori cache; PARTIAL/UNVERIFIED berarti coverage belum pasti.
+→ Avg = total value sisi ÷ (total lot sisi × 100), bukan average posisi net."""
 
-_DATA_HELP = """?? INSIDER DISCLOSURE
+_DATA_HELP = """🗂 INSIDER DISCLOSURE
 INSIDER BBRI
- Disclosure Direksi/Komisaris/Pengendali resmi dari cache Neon; 0 ZAPI.
+→ Disclosure Direksi/Komisaris/Pengendali resmi dari cache Neon; 0 ZAPI.
 INSIDER REFRESH BBRI
- Owner-only, maks. 1 ZAPI lalu simpan ke Neon.
- Data tertunda; tidak disamakan dengan broker/order flow live."""
+→ Owner-only, maks. 1 ZAPI lalu simpan ke Neon.
+→ Data tertunda; tidak disamakan dengan broker/order flow live."""
 
-_ANALYSIS_HELP = """?? BOT1 AI DECISION (Neon EOD; repair histori maks. 1 ZAPI)
+_ANALYSIS_HELP = """🧠 BOT1 AI DECISION (Neon EOD; repair histori maks. 1 ZAPI)
 AI STATUS | AI CHECK BBRI | AI RUN BBRI
- CHECK: 0 AI; RUN: maks. 3 API berbayar dan dinonaktifkan secara default."""
+→ CHECK: 0 AI; RUN: maks. 3 API berbayar dan dinonaktifkan secara default."""
 
 _original_send_telegram = legacy.send_telegram
 
@@ -93,12 +93,12 @@ def send_telegram_with_tape(text: str, chat_id: str | None = None) -> None:
 
 
 legacy.send_telegram = send_telegram_with_tape
-legacy.extend_help_section("ANALISIS", """?? TAPE / FOOTPRINT / HAKA-HAKI
+legacy.extend_help_section("ANALISIS", """📊 TAPE / FOOTPRINT / HAKA–HAKI
 /tape ELTY | /tape ELTY 60 | TAPE ELTY
- Gambar bubble tape, footprint, CVD parsial, VWAP, POC nilai, cetakan besar.
- Alias /footprint, /haka, /dna. On-demand, maks. 7 operasi ZAPI, 0 AI.
- 60 = 60 menit terakhir pada tape tersedia, bukan jaminan live.
- DNA/iceberg/identitas bandar tidak terverifikasi; tanggal/cakupan dilaporkan.""")
+→ Gambar bubble tape, footprint, CVD parsial, VWAP, POC nilai, cetakan besar.
+→ Alias /footprint, /haka, /dna. On-demand, maks. 7 operasi ZAPI, 0 AI.
+→ 60 = 60 menit terakhir pada tape tersedia, bukan jaminan live.
+→ DNA/iceberg/identitas bandar tidak terverifikasi; tanggal/cakupan dilaporkan.""")
 
 _original_command_result = legacy.command_result
 legacy.extend_help_section("ANALISIS", _ANALYSIS_HELP)
@@ -115,7 +115,7 @@ def command_result(text: str, chat_id: str) -> str:
     first_tape = parts[0].split("@")[0].lower()
     if first_tape in TAPE_ALIASES:
         if not legacy.authorized(chat_id):
-            return "? TAPE hanya tersedia untuk chat pribadi pemilik bot."
+            return "⛔ TAPE hanya tersedia untuk chat pribadi pemilik bot."
         if len(parts) not in (2, 3) or (len(parts) == 3 and parts[2] != "60"):
             return TAPE_HELP
         ticker = parts[1].upper().removesuffix(".JK")
@@ -124,16 +124,16 @@ def command_result(text: str, chat_id: str) -> str:
         try:
             return build_tape_report(ticker, window=60 if len(parts) == 3 else None)
         except ValueError as exc:
-            return f"?? TAPE {ticker}: {exc}"
+            return f"⚠️ TAPE {ticker}: {exc}"
         except Exception as exc:
             print(f"[TAPE-ERROR] {type(exc).__name__}")
-            return f"?? TAPE {ticker} belum tersedia ({type(exc).__name__}). Coba kembali; /flow {ticker} untuk konteks EOD."
+            return f"⚠️ TAPE {ticker} belum tersedia ({type(exc).__name__}). Coba kembali; /flow {ticker} untuk konteks EOD."
 
     # Read-only check by default. Legacy owner authorization is checked BEFORE DB/LLM.
     ai_request = parse_ai_command(text)
     if ai_request is not None:
         if not legacy.authorized(chat_id):
-            return "? AI Decision hanya tersedia untuk chat pribadi pemilik bot."
+            return "⛔ AI Decision hanya tersedia untuk chat pribadi pemilik bot."
         return format_ai_command(ai_request, broker_db=str(legacy.DB_PATH))
 
     first = parts[0].split("@")[0].lower()
@@ -232,7 +232,7 @@ def command_result(text: str, chat_id: str) -> str:
                 return format_hint
             limit = int(parts[-1])
         if refresh and not legacy.authorized(chat_id):
-            return "? INSIDER REFRESH hanya tersedia untuk chat pribadi pemilik bot."
+            return "⛔ INSIDER REFRESH hanya tersedia untuk chat pribadi pemilik bot."
         return format_insider_report(ticker, refresh=refresh, limit=limit)
 
     is_bandar_momentum = (
@@ -371,7 +371,7 @@ def command_result(text: str, chat_id: str) -> str:
     )
     if is_broker_watch:
         if not legacy.authorized(chat_id):
-            return "? BROKER WATCH hanya tersedia untuk chat pribadi pemilik bot."
+            return "⛔ BROKER WATCH hanya tersedia untuk chat pribadi pemilik bot."
         options = parts[2:] if first == "broker" else parts[1:]
         format_hint = (
             "Format: BROKER WATCH NI [5D|10D|20D] "
@@ -406,11 +406,11 @@ def command_result(text: str, chat_id: str) -> str:
                 lookback=lookback, limit=limit,
             )
         except ValueError as exc:
-            return f"?? BROKER WATCH {broker_code}: {exc}"
+            return f"⚠️ BROKER WATCH {broker_code}: {exc}"
         except Exception as exc:
             print(f"[BROKER-WATCH-ERROR] {type(exc).__name__}")
             return (
-                f"?? BROKER WATCH {broker_code} belum tersedia "
+                f"⚠️ BROKER WATCH {broker_code} belum tersedia "
                 f"({type(exc).__name__}). Coba kembali."
             )
 
@@ -445,5 +445,3 @@ legacy.command_result = command_result
 
 if __name__ == "__main__":
     raise SystemExit(legacy.main())
-
-
